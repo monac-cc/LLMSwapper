@@ -197,6 +197,45 @@ check('the macOS branch degrades to the file backend instead of crashing', () =>
   }
 });
 
+check('CLAUDE_CONFIG_DIR aparta el Keychain: la suite no puede tocar el llavero real', () => {
+  // Regresión con víctima. En macOS el Keychain es global -no sabe qué es CLAUDE_CONFIG_DIR-
+  // y write() lo prefería igual, así que redirigir el directorio, que es lo único que hace
+  // falta en Windows y Linux, aquí no aislaba nada: correr `node test.js` en un Mac sustituyó
+  // las credenciales reales por los tokens de mentira de un fixture. No basta con comprobar
+  // que el backend elegido es el fichero; hay que comprobar que a `security` no se le llama.
+  const cp = require('node:child_process');
+  const realExec = cp.execFileSync;
+  const invoked = [];
+  cp.execFileSync = (file, ...rest) => { invoked.push(file); return realExec(file, ...rest); };
+
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-nokeychain-'));
+  const realPlatform = process.platform;
+  const previousDir = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = tmp;
+  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+  try {
+    delete require.cache[require.resolve('./lib/credentials')];
+    const credentials = require('./lib/credentials');
+
+    assert.strictEqual(credentials.isMac(), true, 'sigue siendo la rama de macOS');
+    credentials.read();
+    credentials.describeBackend();
+    const where = credentials.write({ claudeAiOauth: { accessToken: 'T', refreshToken: 'R' } });
+
+    assert.strictEqual(where.kind, 'file', 'con CLAUDE_CONFIG_DIR se escribe al fichero');
+    assert.strictEqual(where.location, path.join(tmp, '.credentials.json'));
+    assert.deepStrictEqual(invoked.filter((f) => f === 'security'), [],
+      'ninguna ruta puede invocar `security` con CLAUDE_CONFIG_DIR puesto');
+  } finally {
+    cp.execFileSync = realExec;
+    Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
+    if (previousDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previousDir;
+    delete require.cache[require.resolve('./lib/credentials')];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 check('el keep-alive solo sincroniza la sesión viva si sigue siendo de esa cuenta', () => {
   // Regresión: el keep-alive escribía por RUTA (saltándose el Keychain en macOS) y decidía
   // por activeId, que durante un swap va por detrás de la realidad varios segundos.
