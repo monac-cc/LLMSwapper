@@ -64,6 +64,7 @@ docker run -d --name llmswapper -p 127.0.0.1:7373:7373 \
 - **Mount the `data/` you already use.** A named volume gives the container a separate, empty account store.
 - **Never run the container and `node server.js` together.** The rate floor is per process; two instances rate-limit each other.
 - **Windows:** set `$env:CLAUDE_HOME = $env:USERPROFILE` first. **macOS:** swapping needs credentials in a file, not the Keychain. **Linux:** add `--user "$(id -u):$(id -g)"` if the mounts belong to another uid.
+- `~/.claude.json` is mounted as a single file, so it is a mount point and Linux refuses to replace it by rename (`EBUSY`). Inside a container the server rewrites it in place instead, after the usual backup. Everything else keeps the atomic write.
 - A container **cannot** see host processes or reach WSL. The panel says so on screen rather than reporting "not running" for what it cannot see.
 
 </details>

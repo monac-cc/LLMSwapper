@@ -50,6 +50,35 @@ check('atomic write survives a corrupt-target refusal', () => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+check('un ~/.claude.json montado como fichero en Docker (rename = EBUSY) se reescribe en el sitio', () => {
+  // docker-compose monta ~/.claude.json como bind mount de UN fichero: es un punto de montaje y
+  // rename() encima devuelve EBUSY siempre. Antes eso tumbaba el swap Y su rollback.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-ebusy-'));
+  const f = path.join(tmp, 'claude.json');
+  fs.writeFileSync(f, JSON.stringify({ userID: 'KEEP', oauthAccount: { emailAddress: 'old@x' } }));
+  const realRename = fs.renameSync;
+  let renames = 0;
+  fs.renameSync = () => { renames++; throw Object.assign(new Error('EBUSY: resource busy or locked'), { code: 'EBUSY' }); };
+  try {
+    P.writeJsonAtomic(f, { userID: 'KEEP', oauthAccount: { emailAddress: 'new@x' } });
+  } finally {
+    fs.renameSync = realRename;
+  }
+  assert.ok(renames > 1, 'primero reintenta el rename');
+  assert.deepStrictEqual(P.readJsonFile(f), { userID: 'KEEP', oauthAccount: { emailAddress: 'new@x' } });
+  assert.strictEqual(fs.readdirSync(tmp).filter((n) => n.endsWith('.tmp')).length, 0, 'sin restos .tmp');
+
+  // Cualquier otro fallo del rename sigue siendo fatal: no se pisa el fichero a ciegas.
+  fs.renameSync = () => { throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' }); };
+  try {
+    assert.throws(() => P.writeJsonAtomic(f, { userID: 'OTHER' }), /ENOSPC/);
+  } finally {
+    fs.renameSync = realRename;
+  }
+  assert.strictEqual(P.readJsonFile(f).userID, 'KEEP');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 check('writeJsonAtomic refuses to write a non-object as a whole config', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-t-'));
   assert.throws(() => P.writeJsonAtomic(path.join(tmp, 'y.json'), undefined), /empty JSON/);
