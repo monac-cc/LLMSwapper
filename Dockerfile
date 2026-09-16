@@ -39,7 +39,8 @@ ENV NO_OPEN=1
 # El directorio tiene que existir Y pertenecer a node ANTES del VOLUME: al crear un volumen con
 # nombre por primera vez, Docker copia dueño y permisos de la ruta en la imagen. Sin esto el
 # volumen nace de root, el proceso corre como node, y el arranque muere con
-# EACCES: permission denied, mkdir '/app/data/backups'.
+# EACCES: permission denied, mkdir '/app/data/backups'. Solo vale para volúmenes con nombre: un
+# bind mount (./data en el compose) trae el dueño del host, así que ahí data/ tiene que existir ya.
 RUN mkdir -p /app/data && chown -R node:node /app
 
 # data/ guarda tokens vivos. Declararlo como volumen evita que acabe en una capa de la imagen

@@ -39,6 +39,11 @@ services:
       # el contenedor la ve, y al revés. Un volumen con nombre (`llmswapper-data:/app/data`)
       # daría un almacén SEPARADO y vacío - correcto para un servidor que solo usa Docker,
       # desconcertante en una máquina donde ya tenías cuentas dadas de alta.
+      #
+      # En un host Linux, CREA data/ antes del primer `up` (`mkdir -p data`; `node server.js` ya
+      # lo hizo si arrancaste el panel alguna vez). Docker crea un origen de bind mount que no
+      # existe como root, y el servidor corre como uid 1000: EACCES al arrancar (mkdir /app/data/backups). El chown
+      # del Dockerfile no ayuda aquí, solo siembra volúmenes con nombre.
       - ./data:/app/data
 
       # La configuración REAL de Claude Code en tu máquina: sin esto el swap no tiene nada que

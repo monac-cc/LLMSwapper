@@ -61,7 +61,7 @@ docker run -d --name llmswapper -p 127.0.0.1:7373:7373 \
 ```
 
 - **Publish on `127.0.0.1` only.** Inside the container the server must listen on `0.0.0.0`, so the loopback guarantee has to be imposed here.
-- **Mount the `data/` you already use.** A named volume gives the container a separate, empty account store.
+- **Mount the `data/` you already use.** A named volume gives the container a separate, empty account store. On a Linux host create it first (`mkdir -p data`) if the panel has never run there: Docker creates a missing bind-mount source as root, and the server, which runs as uid 1000, cannot write to it.
 - **Never run the container and `node server.js` together.** The rate floor is per process; two instances rate-limit each other.
 - **Windows:** set `$env:CLAUDE_HOME = $env:USERPROFILE` first. **macOS:** swapping needs credentials in a file, not the Keychain. **Linux:** add `--user "$(id -u):$(id -g)"` if the mounts belong to another uid.
 - **Update with `git pull && docker compose up -d`.** The compose file rebuilds on every `up`; with `docker run` you have to `docker build` again yourself. The container banner shows the build stamp, so a stale container is visible at a glance.
