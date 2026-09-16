@@ -200,9 +200,9 @@ check('swap refuses to touch a config it cannot parse', () => {
 });
 
 check('credentials round-trip through the file backend', () => {
-  // CLAUDE_CONFIG_DIR redirects paths.credentialsPath(), so this never touches the
-  // real credentials. On macOS the Keychain path is preferred but falls back to the
-  // file when no Keychain item exists - which is exactly this situation.
+  // CLAUDE_CONFIG_DIR redirects paths.credentialsPath() and, on macOS, names a Keychain item
+  // that cannot exist (lib/credentials suffixes the service with a hash of the directory, as
+  // Claude Code does), so this never touches the real credentials on any platform.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-cred-'));
   const previous = process.env.CLAUDE_CONFIG_DIR;
   process.env.CLAUDE_CONFIG_DIR = tmp;
@@ -238,10 +238,23 @@ check('credentials round-trip through the file backend', () => {
   }
 });
 
-check('the macOS branch degrades to the file backend instead of crashing', () => {
+check('the macOS branch degrades to the file backend, and a throwaway CLAUDE_CONFIG_DIR keeps it off the real Keychain', () => {
   // Forces the darwin path on whatever this really is. Where `security` does not exist
   // (or holds no item) the Keychain read must fail soft and fall back to the file -
   // this is the closest thing to macOS coverage without a Mac.
+  //
+  // Regresión con víctima (PR #1): el Keychain es global y write() lo prefería en cuanto
+  // encontraba el item, así que en un Mac esta suite pisó las credenciales reales con tokens
+  // de fixture. Claude Code nombra el item por CLAUDE_CONFIG_DIR (sufijo sha256) y ahora
+  // nosotros también, de modo que un directorio de usar y tirar apunta a un item que no
+  // existe. No basta con mirar qué backend sale elegido: se interceptan las llamadas a
+  // `security` y se exige que todas lleven el sufijo, la cuenta de Claude Code, y que
+  // ninguna escriba.
+  const cp = require('node:child_process');
+  const realExec = cp.execFileSync;
+  const invoked = [];
+  cp.execFileSync = (file, args, ...rest) => { invoked.push({ file, args }); return realExec(file, args, ...rest); };
+
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-darwin-'));
   const realPlatform = process.platform;
   const previousDir = process.env.CLAUDE_CONFIG_DIR;
@@ -250,6 +263,9 @@ check('the macOS branch degrades to the file backend instead of crashing', () =>
   try {
     delete require.cache[require.resolve('./lib/credentials')];
     const credentials = require('./lib/credentials');
+    const suffix = require('node:crypto').createHash('sha256').update(tmp).digest('hex').slice(0, 8);
+    assert.strictEqual(credentials.SERVICE, `Claude Code-credentials-${suffix}`, 'el item lleva el sufijo del config dir');
+    assert.strictEqual(credentials.ACCOUNTS[0], 'claude-code-user', 'la cuenta que usa Claude Code 2.1+');
 
     assert.strictEqual(credentials.isMac(), true, 'must take the mac branch');
     assert.strictEqual(credentials.read(), null, 'no keychain and no file -> null, not a throw');
@@ -258,7 +274,15 @@ check('the macOS branch degrades to the file backend instead of crashing', () =>
     assert.strictEqual(credentials.write(blob).kind, 'file', 'must fall back to the file');
     assert.deepStrictEqual(credentials.read(), blob);
     assert.ok(['file', 'keychain'].includes(credentials.describeBackend().kind));
+
+    const sec = invoked.filter((c) => c.file === 'security');
+    assert.ok(sec.length > 0, 'the mac branch must have asked the Keychain');
+    for (const c of sec) {
+      assert.strictEqual(c.args[0], 'find-generic-password', 'nunca escribe en el Keychain con un CLAUDE_CONFIG_DIR de usar y tirar');
+      assert.ok(c.args.includes(`Claude Code-credentials-${suffix}`), 'cada lectura apunta al item con sufijo, nunca al real');
+    }
   } finally {
+    cp.execFileSync = realExec;
     Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
     if (previousDir === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = previousDir;

@@ -37,7 +37,7 @@ node server.js          # opens http://127.0.0.1:7373
 | | |
 |---|---|
 | **Windows** | Also detects your WSL distros and swaps inside them, from the same screen. |
-| **macOS** | Credentials may live in the login Keychain; the app reads and writes it through `security`. |
+| **macOS** | Credentials usually live in the login Keychain - item `Claude Code-credentials`, account `claude-code-user` - and the app reads and writes that item through `security`; a plain `~/.claude/.credentials.json` is used when that item does not exist. With `CLAUDE_CONFIG_DIR` set it addresses that directory's own item, as Claude Code does. |
 | **Linux** | Nothing special. This is the host the Docker image is really for. |
 
 </details>

@@ -11,7 +11,7 @@ Zero dependencies. Node >= 18 (global `fetch`). No build step.
 
 | Piece | Location |
 |---|---|
-| Tokens | Windows/Linux: `~/.claude/.credentials.json` · macOS: login Keychain |
+| Tokens | Windows/Linux: `~/.claude/.credentials.json` · macOS: login Keychain, item `Claude Code-credentials` (suffixed `-<sha256(CLAUDE_CONFIG_DIR)[:8]>` when that variable is set), account `claude-code-user` - read out of the 2.1.273 bundle; older builds filed it under the login user, which is tried as a fallback |
 | Identity | `~/.claude.json` -> `oauthAccount` |
 
 `lib/credentials.js` is the only module that knows which backend applies.
