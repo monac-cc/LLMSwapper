@@ -795,7 +795,7 @@ let queuedRetry = null;
 function scheduleQueuedRetry() {
   // `throttled` is an account with no reading yet; `queued` one that has an old reading and
   // is waiting its turn behind the rate floor. Both need a re-poll once the floor lifts, or a
-  // manual refresh would renew one account and leave the rest stale until the 10-min poll.
+  // manual refresh would renew one account and leave the rest stale until the 5-min poll.
   const waits = Object.values(usageById)
     .filter((u) => u && (u.throttled || u.queued) && Number.isFinite(u.retryInS))
     .map((u) => u.retryInS);

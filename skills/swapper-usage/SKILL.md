@@ -17,7 +17,7 @@ node "<directorio de esta skill>/swapper.mjs" usage
 
 `<directorio de esta skill>` es la carpeta donde está este archivo (la misma donde está `swapper.mjs`). Usa su ruta absoluta.
 
-Muestra la salida del comando tal cual: ya viene formateada como tabla (cuenta · sesión 5h · semana 7d · estado), con `●` en la cuenta activa y `!`/`!!` marcando las que superan 80%/90%.
+Muestra la salida del comando tal cual: ya viene formateada, una línea por cuenta (cuenta · sesión 5h · semana 7d · estado), con `●` en la cuenta en uso, `→` en la más libre para cambiar, y `casi`/`tope` en las que rondan o alcanzan el límite.
 
 ## Si falla
 

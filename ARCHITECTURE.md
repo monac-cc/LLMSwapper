@@ -102,7 +102,7 @@ The number that matters is not the average rate but how many calls fit in the en
 window: with a gap of `g` that is `floor(300/g) + 1`, so `g` must satisfy `4g >= 300`. At 70 s
 it was exactly five, i.e. the app rate-limited itself.
 
-Everything else sits around that floor: a 15-minute cache, 10-minute polling, and a backoff
+Everything else sits around that floor: a 4-minute cache, 5-minute polling, and a backoff
 that starts at 10 minutes and **doubles with each consecutive 429**, capped at an hour. The
 cooldown and the offence counter are persisted alongside the cache, because a restart that
 forgot them walked straight back into the block and reset the escalation.
@@ -132,10 +132,10 @@ permanently. That has three consequences. There is no email and no `accountUuid`
 token twice updates in place instead of creating a second row. Usage cannot come from the usage
 endpoint, so `store.canReadUsage` routes these accounts to the header probe below instead: a 403
 is not a 429, nothing would absorb it, and the request would repeat every sweep and starve the
-accounts that can answer. And there is no profile to write, so the swap **deletes** `oauthAccount` from
-`~/.claude.json` rather than leaving the previous account's - Claude Code only reconciles that
-block against the token when the token carries `user:profile`, so a stale one just sits there
-naming the account you swapped away from.
+accounts that can answer. And there is no profile to write, so the swap writes an `oauthAccount` built from the
+account's label (`swap.identityFromLabel`) rather than leaving the previous account's - Claude Code
+only reconciles that block against the token when the token carries `user:profile`, so a stale one
+just sits there naming the account you swapped away from, and an empty one leaves `/status` blank.
 
 **It has no refresh token, and that is fine.** Claude Code's refresh routine returns early with
 `"not_needed"` when `expiresAt` is more than 5 minutes out and `"no_refresh_token"` otherwise -
@@ -295,19 +295,19 @@ only shape allowed to reach the browser; it strips `oauth` and `userID`.
 
 | Method | Path | Returns |
 |---|---|---|
-| GET | `/api/health` | `{ok, claudeRunning, pids, node, platform, credentialsBackend, overridingEnv, paths}` |
+| GET | `/api/health` | `{ok, claudeRunning, pids, node, platform, credentialsBackend, overridingEnv, paths, container, unavailable, build, staleMount}` |
 | GET | `/api/targets` | `{targets:[{id, kind, label, activeId, running}]}` - host + each WSL distro |
 | GET | `/api/accounts?target=` | `{activeId, accounts:[...]}` for that target - token fields stripped |
 | GET | `/api/usage/all` | `{ "<id>": NormalizedUsage }`, sequential, failures isolated |
 | GET | `/api/usage?id=` | `NormalizedUsage` |
-| POST | `/api/swap` | `{id, target?}` -> `{ok, verified, target, warnings[], backup, account}` |
+| POST | `/api/swap` | `{id, target?}` -> `{ok, verified, target, warnings[], backup, account}` - 400 for a target that does not resolve, 409 while another swap is in flight |
 | POST | `/api/swap/dryrun` | `{id, target?}` -> what would change, writes nothing |
 | POST | `/api/accounts/import` | `{configDir?, target?}` -> `{ok, account}` |
 | POST | `/api/accounts/token` | `{token, label?}` -> `{ok, kind, warnings[], account}` - paste a long-lived token |
 | POST | `/api/token/terminal` | `{}` -> `{ok, how}` - opens a terminal running `claude setup-token`; 409 in a container or without the CLI |
 | PATCH | `/api/accounts/:id` | `{label?, color?}` |
 | DELETE | `/api/accounts/:id` | `{ok}` |
-| GET | `/api/auto` | `{enabled, target, threshold, current, next}` - cached readings only, spends nothing |
+| GET | `/api/auto` | `{enabled, target, threshold, current, next, queue[]}` - cached readings only, spends nothing |
 | POST | `/api/auto` | `{enabled?, target?, threshold?}` -> the same status |
 
 `target` defaults to `host`. Usage is target-independent (the token is the same in any
@@ -340,11 +340,11 @@ NormalizedUsage:
     // from the header probe: the same shape plus viaProbe:true, scoped:[] and opus/extraUsage null
     //   - see "Quota from the rate-limit headers"
 
-Guards: loopback bind, `Host` validated, cross-site `Origin` rejected, `X-Swapper: 1` required
+Guards: loopback bind (`SWAPPER_BIND` widens it, and `SWAPPER_ALLOWED_HOSTS` then names the extra hostnames the `Host` check lets in), `Host` validated, cross-site `Origin` rejected, `X-Swapper: 1` required
 on **every `/api/` request, GET included**, static serving confined to `public/`. Anything
 matching `sk-ant-[A-Za-z0-9_-]+` is scrubbed before it can reach a log or a response body.
 
-The `Host` check validates the **hostname only** - `127.0.0.1`, `localhost`, `::1` - and
+The `Host` check validates the **hostname only** - `127.0.0.1`, `localhost`, `[::1]` - and
 deliberately ignores the port. A container listens on 7373 and is published as whatever the user
 chose, so the browser sends the *published* port, which this process cannot know; pinning it
 rejected every containerised request with "Host no permitido". Nothing is lost by dropping it,

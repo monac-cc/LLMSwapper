@@ -550,6 +550,14 @@ check('no source file hardcodes a token', () => {
   }
 });
 
+check('las tres skills llevan el mismo swapper.mjs', () => {
+  // Se editan en bloque (seis de los últimos quince commits tocaron las tres) y nada lo garantizaba.
+  const [a, b, c] = ['swapper', 'swapper-usage', 'swapper-auto']
+    .map((sk) => fs.readFileSync(path.join(__dirname, 'skills', sk, 'swapper.mjs'), 'utf8'));
+  assert.strictEqual(a, b, 'swapper-usage/swapper.mjs difiere de swapper/swapper.mjs');
+  assert.strictEqual(a, c, 'swapper-auto/swapper.mjs difiere de swapper/swapper.mjs');
+});
+
 async function checkAsync(name, fn) {
   try {
     await fn();
