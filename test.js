@@ -79,6 +79,47 @@ check('un ~/.claude.json montado como fichero en Docker (rename = EBUSY) se rees
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+check('un fichero montado (otro device que su directorio) se escribe en el sitio, sin rename', () => {
+  // Es lo que ve el servidor dentro de Docker: /home/node/.claude.json en un device y
+  // /home/node en otro. Ahí el rename nunca va a funcionar, así que ni se intenta.
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-mount-'));
+  const f = path.join(tmp, 'claude.json');
+  fs.writeFileSync(f, JSON.stringify({ userID: 'KEEP', oauthAccount: { emailAddress: 'old@x' } }));
+  const realStat = fs.statSync;
+  const realRename = fs.renameSync;
+  let renames = 0;
+  const fakeMount = (nlink) => (p, ...rest) => {
+    const st = realStat(p, ...rest);
+    if (path.resolve(p) === path.resolve(f)) return Object.assign(st, { dev: st.dev + 1, nlink });
+    return st;
+  };
+  fs.renameSync = (...a) => { renames++; return realRename(...a); };
+  try {
+    fs.statSync = fakeMount(1);
+    assert.strictEqual(P.isMountedFile(f), true);
+    assert.strictEqual(P.isDetachedMount(f), false);
+    P.writeJsonAtomic(f, { userID: 'KEEP', oauthAccount: { emailAddress: 'new@x' } });
+    assert.strictEqual(renames, 0, 'sin rename');
+    fs.statSync = realStat;
+    assert.deepStrictEqual(P.readJsonFile(f), { userID: 'KEEP', oauthAccount: { emailAddress: 'new@x' } });
+    assert.strictEqual(fs.readdirSync(tmp).filter((n) => n.endsWith('.tmp')).length, 0, 'sin restos .tmp');
+
+    // Host Linux: Claude Code renombró un fichero nuevo encima y el contenedor se quedó con el
+    // inode viejo (nlink 0). Escribir ahí sería un swap "correcto" que el host nunca vería.
+    fs.statSync = fakeMount(0);
+    assert.strictEqual(P.isDetachedMount(f), true);
+    assert.throws(() => P.writeJsonAtomic(f, { userID: 'LOST' }), /reinicia el contenedor/);
+    fs.statSync = realStat;
+    assert.strictEqual(P.readJsonFile(f).userID, 'KEEP', 'no se toca el fichero');
+    assert.strictEqual(renames, 0);
+  } finally {
+    fs.statSync = realStat;
+    fs.renameSync = realRename;
+  }
+  assert.strictEqual(P.isMountedFile(f), false, 'un fichero normal no es un punto de montaje');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 check('writeJsonAtomic refuses to write a non-object as a whole config', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-t-'));
   assert.throws(() => P.writeJsonAtomic(path.join(tmp, 'y.json'), undefined), /empty JSON/);
@@ -302,6 +343,22 @@ check('el store adopta el par que Claude Code rotó por su cuenta, y solo si sab
     assert.strictEqual(after.refreshToken, 'R-NUEVO');
     assert.strictEqual(after.accessToken, 'NUEVO');
     assert.strictEqual(after.subscriptionType, 'max', 'lo que el store sabía de más debe sobrevivir');
+
+    // Mount desprendido (Linux, ver paths.js): ~/.claude.json es una copia congelada que dirá
+    // "uuid-live" para siempre, mientras el host puede haber hecho login con OTRA cuenta. No se
+    // adopta nada: injertaría el par de esa otra cuenta en esta y perdería el suyo.
+    writeLive('R-DE-OTRO-LOGIN');
+    const realStat = fs.statSync;
+    fs.statSync = (p, ...rest) => {
+      const st = realStat(p, ...rest);
+      return path.resolve(p) === path.resolve(P.claudeJsonPath()) ? Object.assign(st, { nlink: 0 }) : st;
+    };
+    try {
+      assert.strictEqual(swapLib.adoptLiveTokens(store), null, 'copia congelada: no adoptar');
+    } finally {
+      fs.statSync = realStat;
+    }
+    assert.strictEqual(store.get(account.id).oauth.refreshToken, 'R-NUEVO', 'el par guardado no se toca');
   } finally {
     if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = previous;
@@ -385,6 +442,17 @@ check('el rollback restaura ~/.claude.json con escritura atómica, no copyFileSy
     assert.deepStrictEqual(P.readJsonFile(P.claudeJsonPath()), original);
     assert.strictEqual(fs.readdirSync(tmp).filter((n) => n.endsWith('.tmp')).length, 0, 'sin restos .tmp');
 
+    // Si la config viva sigue siendo byte a byte el backup (la escritura se rechazó antes de
+    // tocarla), no hay nada que restaurar: ni se escribe ni se dice que falló la restauración.
+    fs.copyFileSync(path.join(backupDir, 'claude.json'), P.claudeJsonPath());
+    const realWrite = P.writeJsonAtomic;
+    P.writeJsonAtomic = (p) => { throw new Error(`no debería escribir ${p}`); };
+    try {
+      assert.deepStrictEqual(swapLib.restoreFrom(backupDir), []);
+    } finally {
+      P.writeJsonAtomic = realWrite;
+    }
+
     // Y un backup corrupto no puede llevarse por delante la configuración viva: la ruta
     // atómica lo rechaza antes de abrir el destino. copyFileSync lo habría copiado encima,
     // que es la misma ventana por la que un fallo a mitad de copia dejaba un fragmento.
@@ -461,6 +529,46 @@ async function checkAsync(name, fn) {
 }
 
 (async () => {
+  await checkAsync('con el mount desprendido, swapTo rechaza ANTES de hacer backup o tocar credenciales', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-detached-'));
+    const previous = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = tmp;
+    delete require.cache[require.resolve('./lib/credentials')];
+    const store = require('./lib/store');
+    try {
+      fs.writeFileSync(P.credentialsPath(), '{"claudeAiOauth":{"accessToken":"HOST","refreshToken":"R-HOST"}}');
+      fs.writeFileSync(P.claudeJsonPath(), '{"oauthAccount":{"accountUuid":"uuid-host"}}');
+      const account = store.add({
+        email: 'next@x.com', profile: { accountUuid: 'uuid-next', emailAddress: 'next@x.com' },
+        oauth: { accessToken: 'NEXT', refreshToken: 'R-NEXT', expiresAt: Date.now() + 3600e3 },
+      });
+      const backupsBefore = fs.existsSync(P.backupsDir()) ? fs.readdirSync(P.backupsDir()).length : 0;
+      const credsBefore = fs.readFileSync(P.credentialsPath());
+      const realStat = fs.statSync;
+      fs.statSync = (p, ...rest) => {
+        const st = realStat(p, ...rest);
+        return path.resolve(p) === path.resolve(P.claudeJsonPath()) ? Object.assign(st, { nlink: 0 }) : st;
+      };
+      try {
+        await assert.rejects(swapLib.swapTo(account.id, { store, oauth: {}, usage: {} }), (err) => {
+          assert.match(err.message, /reinicia el contenedor/);
+          assert.doesNotMatch(err.message, /RESTAURACI/, 'no hubo nada que restaurar, y no debe decir lo contrario');
+          return true;
+        });
+      } finally {
+        fs.statSync = realStat;
+      }
+      const backupsAfter = fs.existsSync(P.backupsDir()) ? fs.readdirSync(P.backupsDir()).length : 0;
+      assert.strictEqual(backupsAfter, backupsBefore, 'sin backup nuevo');
+      assert.ok(fs.readFileSync(P.credentialsPath()).equals(credsBefore), 'credenciales intactas');
+    } finally {
+      if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previous;
+      delete require.cache[require.resolve('./lib/credentials')];
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   await checkAsync('la cabecera X-Swapper es obligatoria en toda la API, GET incluido', async () => {
     // Un <img src="http://127.0.0.1:7373/api/health"> desde cualquier web pasaba las tres
     // guardas: sin Origin, método GET, y Host correcto. Cada llamada lanza un tasklist.

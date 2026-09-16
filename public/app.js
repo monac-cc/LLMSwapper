@@ -37,6 +37,7 @@ const I18N = {
 
     'banner.offline': 'Sin respuesta del servidor local. ¿Se ha cerrado <code>node server.js</code>?',
     'banner.container': 'En contenedor: no puede ver si Claude Code está abierto ni ofrecer targets de WSL. El swap sobre el host sí funciona si montaste su <code>~/.claude</code>.',
+    'banner.stale': 'El <code>~/.claude.json</code> montado ya no es el fichero del host: Claude Code lo reemplazó y el contenedor se quedó con el viejo. Reinicia el contenedor (<code>docker compose restart</code>) o, en Linux, monta el directorio en vez del fichero (README, Docker).',
     'banner.env': 'gana al fichero de credenciales: mientras siga definida, los cambios de cuenta <strong>no tendrán efecto</strong> en Claude Code.',
 
     'dir.label': 'Importar desde otra carpeta de configuración',
@@ -119,6 +120,7 @@ const I18N = {
 
     'banner.offline': 'No answer from the local server. Did <code>node server.js</code> stop?',
     'banner.container': 'In a container: it cannot see whether Claude Code is running, and there are no WSL targets. Swapping the host still works if you mounted its <code>~/.claude</code>.',
+    'banner.stale': 'The mounted <code>~/.claude.json</code> is no longer the host file: Claude Code replaced it and the container kept the old one. Restart the container (<code>docker compose restart</code>) or, on Linux, mount the directory instead of the file (README, Docker).',
     'banner.env': 'outranks the credentials file: while it is set, switching accounts <strong>will have no effect</strong> in Claude Code.',
 
     'dir.label': 'Import from another config directory',
@@ -824,6 +826,7 @@ async function refresh(force = false) {
     scheduleQueuedRetry();
 
     render();
+    reportEnvironment();
   } catch (err) {
     $('#banner-offline').hidden = false;
     envsEl.setAttribute('aria-busy', 'false');
@@ -835,17 +838,23 @@ async function refresh(force = false) {
 }
 
 /**
- * Two things only the server can know, asked once at boot rather than on every poll: whether it
- * is running inside a container (where it cannot see host processes or WSL distros) and whether
- * an environment variable outranks the credentials file. The second is the nastier one - every
- * swap then reports success and changes nothing that Claude Code will read - and it is invisible
- * from the panel unless it is said out loud.
+ * Three things only the server can know, asked with every refresh (two stats and a flag, no
+ * Anthropic call): whether it is running inside a container (where it cannot see host processes
+ * or WSL distros), whether an environment variable outranks the credentials file, and whether a
+ * bind-mounted ~/.claude.json has detached from the host's file. The second is the nastier one -
+ * every swap then reports success and changes nothing that Claude Code will read - and it is
+ * invisible from the panel unless it is said out loud. The third can flip while the tab is
+ * open, which is why this is not asked once at boot.
  */
 async function reportEnvironment() {
   let health;
   try { health = await api('/api/health'); } catch { return; }
 
-  if (health.container) $('#banner-container').hidden = false;
+  if (health.container) {
+    $('#banner-container').hidden = false;
+    if (health.build) $('#build-stamp').textContent = `build ${health.build}`;
+  }
+  $('#banner-stale').hidden = !health.staleMount;
 
   const vars = health.overridingEnv || [];
   if (vars.length) {
@@ -974,7 +983,6 @@ setInterval(() => { if (!swapping) refresh(false); }, POLL_MS);
 // API call every time.
 renderSkeletons();
 refresh(false);
-reportEnvironment();
 
 /* ---------------- fondo: campo de brasas de fosforo (firma) ----------------
    Particulas advectadas por un flow-field barato (suma de senos: sin tablas de ruido,

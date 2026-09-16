@@ -14,6 +14,10 @@ services:
   llmswapper:
     build: .
     image: llmswapper:latest
+    # Reconstruye en cada `up`. Sin esto, tras un `git pull`, `docker compose up -d` arranca la
+    # imagen ANTERIOR sin avisar y el arreglo que acabas de bajar no corre. Con caché tarda un
+    # par de segundos; no hay npm install que repetir.
+    pull_policy: build
     container_name: llmswapper
 
     # 127.0.0.1: en el lado del HOST. El servidor escucha en 0.0.0.0 dentro del contenedor
@@ -41,7 +45,18 @@ services:
       # cambiar y el panel queda en modo mirón. CLAUDE_HOME por defecto es $HOME, que resuelve
       # solo en Linux y macOS; en Windows (PowerShell) define antes:
       #   $env:CLAUDE_HOME = $env:USERPROFILE
-      - ${CLAUDE_HOME:-${HOME}}/.claude:/home/node/.claude
-      - ${CLAUDE_HOME:-${HOME}}/.claude.json:/home/node/.claude.json
+      #
+      # Se monta el directorio home ENTERO, no ~/.claude y ~/.claude.json por separado, porque
+      # ~/.claude.json va suelto en el home y Claude Code lo reescribe creando un fichero nuevo y
+      # renombrándolo encima: en Linux nativo un bind mount de UN fichero se queda con el inode
+      # viejo, el contenedor lee una copia congelada y sus escrituras nunca llegan al host. Con el
+      # directorio montado el rename ocurre dentro del mount y todo sigue siendo atómico. El
+      # contenedor ve todo tu home; ya tenía tus credenciales de Claude, que es lo valioso.
+      #
+      # Solo en Docker Desktop (Windows, macOS), que resuelve por ruta y no por inode, puedes
+      # cambiar esta línea por las dos de siempre y exponer menos:
+      #   - ${CLAUDE_HOME:-${HOME}}/.claude:/home/node/.claude
+      #   - ${CLAUDE_HOME:-${HOME}}/.claude.json:/home/node/.claude.json
+      - ${CLAUDE_HOME:-${HOME}}:/home/node
 
     restart: unless-stopped

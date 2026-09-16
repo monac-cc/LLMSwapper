@@ -165,6 +165,10 @@ async function adoptTokens(tokenOauth, existingUserID) {
   return store.add({ email, oauth: tokenOauth, profile, userID: existingUserID || null });
 }
 
+const BUILD = (() => {
+  try { return fs.readFileSync(path.join(__dirname, '.build'), 'utf8').trim(); } catch { return ''; }
+})();
+
 async function handleApi(req, res, url, port) {
   const { pathname } = url;
   const method = req.method;
@@ -181,6 +185,11 @@ async function handleApi(req, res, url, port) {
       // screen and mean opposite things.
       container: P.inContainer(),
       unavailable: P.inContainer() ? ['processDetection', 'wslTargets'] : [],
+      // Stamped by the Dockerfile. Lets the panel say which build is running, because a
+      // `docker compose up -d` without --build keeps serving the previous image in silence.
+      build: BUILD,
+      // The bind-mounted ~/.claude.json no longer being the host's file (Linux hosts only).
+      staleMount: P.inContainer() && P.isDetachedMount(P.claudeJsonPath()),
       paths: { claudeJson: P.claudeJsonPath(), data: P.dataDir() },
     });
   }
@@ -492,7 +501,7 @@ function listen(port) {
     // Inherited from the shell, this silently redirects every read and write to a throwaway
     // config - and the README teaches people to set it for an isolated login.
     if (P.inContainer()) {
-      console.log('  contenedor: sin detección de procesos ni targets WSL (frontera del contenedor)');
+      console.log(`  contenedor: sin detección de procesos ni targets WSL (frontera del contenedor)${BUILD ? ` · build ${BUILD}` : ''}`);
     }
     if (BIND !== HOST) {
       console.log(`  AVISO: escuchando en ${BIND}, no solo en el loopback.`);

@@ -47,6 +47,7 @@ node server.js          # opens http://127.0.0.1:7373
 
 ```bash
 docker compose up -d          # http://127.0.0.1:7373
+git pull && docker compose up -d   # update: compose rebuilds the image on every up
 ```
 
 By hand, on a port of your choice:
@@ -55,8 +56,7 @@ By hand, on a port of your choice:
 docker build -t llmswapper .
 docker run -d --name llmswapper -p 127.0.0.1:7373:7373 \
   -v "$PWD/data:/app/data" \
-  -v "$HOME/.claude:/home/node/.claude" \
-  -v "$HOME/.claude.json:/home/node/.claude.json" \
+  -v "$HOME:/home/node" \
   llmswapper
 ```
 
@@ -64,7 +64,9 @@ docker run -d --name llmswapper -p 127.0.0.1:7373:7373 \
 - **Mount the `data/` you already use.** A named volume gives the container a separate, empty account store.
 - **Never run the container and `node server.js` together.** The rate floor is per process; two instances rate-limit each other.
 - **Windows:** set `$env:CLAUDE_HOME = $env:USERPROFILE` first. **macOS:** swapping needs credentials in a file, not the Keychain. **Linux:** add `--user "$(id -u):$(id -g)"` if the mounts belong to another uid.
-- `~/.claude.json` is mounted as a single file, so it is a mount point and Linux refuses to replace it by rename (`EBUSY`). Inside a container the server rewrites it in place instead, after the usual backup. Everything else keeps the atomic write.
+- **Update with `git pull && docker compose up -d`.** The compose file rebuilds on every `up`; with `docker run` you have to `docker build` again yourself. The container banner shows the build stamp, so a stale container is visible at a glance.
+- **Mount your home directory, not `~/.claude` and `~/.claude.json` separately.** Claude Code rewrites `~/.claude.json` by renaming a new file over it, and a single-file bind mount on a Linux host keeps the *old* inode: the container reads a frozen copy and its writes never reach the host. With the home directory mounted, the rename happens inside the mount and every write stays atomic. The container sees your whole home; it already held your Claude credentials, which is the valuable part.
+- **Docker Desktop (Windows, macOS) resolves the share by path**, so there the narrower pair `-v "$HOME/.claude:/home/node/.claude" -v "$HOME/.claude.json:/home/node/.claude.json"` also works. On a file mount the server writes in place (a mount point cannot be replaced by rename), and if the mount ever detaches it refuses to swap and says so in a banner, rather than pretending.
 - A container **cannot** see host processes or reach WSL. The panel says so on screen rather than reporting "not running" for what it cannot see.
 
 </details>

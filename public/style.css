@@ -348,6 +348,8 @@ code {
 }
 .notice p { margin: 0; }
 .notice .ico { margin-top: 1px; }
+.notice .stamp { margin-left: auto; white-space: nowrap; font-size: 11px; opacity: 0.7; }
+.notice .stamp:empty { display: none; }
 .notice-warn { border-color: rgba(255, 204, 77, 0.32); background: rgba(255, 204, 77, 0.06); color: #e6d9a8; }
 .notice-warn .ico { color: var(--warn); }
 .notice-error { border-color: rgba(255, 92, 114, 0.32); background: rgba(255, 92, 114, 0.06); color: #f4b6bf; }

@@ -19,6 +19,12 @@ COPY server.js test.js ./
 COPY lib/ ./lib/
 COPY public/ ./public/
 
+# Sello de build. Un `docker compose up -d` sin --build reutiliza la imagen anterior sin decir
+# nada, y desde fuera no hay forma de saber qué código corre: el panel lo enseña en el aviso de
+# contenedor y /api/health lo devuelve. Va DETRÁS de los COPY para que la caché lo regenere
+# exactamente cuando cambia el código, y nunca antes.
+RUN date -u +%Y-%m-%dT%H:%MZ > /app/.build
+
 # Lo lee lib/paths.inContainer(). /.dockerenv basta para Docker, pero no para Podman ni para
 # algunos runtimes de Kubernetes, así que se declara explícitamente y no se deja a la deducción.
 ENV SWAPPER_IN_CONTAINER=1
@@ -42,6 +48,9 @@ VOLUME ["/app/data"]
 
 # uid 1000 es el primer usuario en la mayoría de distros Linux, así que los ficheros montados
 # suelen coincidir. Cuando no coincidan:  --user "$(id -u):$(id -g)"
+# HOME fijo: con --user, un uid que no está en /etc/passwd arranca con HOME=/ y el servidor
+# buscaría /.claude.json y /.claude en vez de lo montado en /home/node.
+ENV HOME=/home/node
 USER node
 
 EXPOSE 7373
