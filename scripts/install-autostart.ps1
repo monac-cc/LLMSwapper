@@ -73,7 +73,8 @@ if (-not (Test-Path $launcher)) { throw "No encuentro $launcher" }
 $node = Resolve-Node $Node
 Write-Host "node: $node"
 
-# wscript.exe ejecuta el .vbs oculto; le pasamos la ruta de node ya resuelta.
+# wscript.exe ejecuta el .vbs oculto y se queda esperando a node, para que la tarea viva lo que
+# viva el servidor y RestartCount/MultipleInstances se apliquen a el. Le pasamos node ya resuelto.
 $action = New-ScheduledTaskAction -Execute 'wscript.exe' `
   -Argument ('"{0}" "{1}"' -f $launcher, $node) `
   -WorkingDirectory $root
@@ -93,8 +94,17 @@ Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
   -Settings $settings -Principal $principal -Force `
   -Description 'LLMSwapper: panel local en http://127.0.0.1:7373, arranca con la sesion.' | Out-Null
 
-Start-ScheduledTask -TaskName $TaskName
-Write-Host "Tarea '$TaskName' registrada y arrancada."
+# Un servidor arrancado a mano (o por la tarea anterior) ya escucha en 7373: el nuevo saldria con
+# 0 por puerto ocupado y la tarea quedaria en Listo sin supervisar nada. Mejor decirlo.
+$busy = @(Get-NetTCPConnection -LocalPort 7373 -State Listen -ErrorAction SilentlyContinue)
+if ($busy.Count -gt 0) {
+  Write-Host "Tarea '$TaskName' registrada. Ya hay algo escuchando en 7373 (PID $($busy[0].OwningProcess)): cierralo y ejecuta"
+  Write-Host "  Start-ScheduledTask -TaskName $TaskName"
+  Write-Host "o vuelve a iniciar sesion, y la tarea lo arrancara supervisado."
+} else {
+  Start-ScheduledTask -TaskName $TaskName
+  Write-Host "Tarea '$TaskName' registrada y arrancada."
+}
 Write-Host "  al iniciar sesion: arranca sola, oculta"
 Write-Host "  si cae:            se reinicia (3 intentos, cada 1 min)"
 Write-Host "  log:               $root\data\server.log"
