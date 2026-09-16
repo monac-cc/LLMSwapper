@@ -450,6 +450,14 @@ check('un swap a un target de fichero (WSL) escribe en SUS ficheros, no en los d
   fs.rmSync(backup.dir, { recursive: true, force: true });
 });
 
+check('un target que no resuelve no cae en silencio al host', () => {
+  // swap.js tomaba `targets.resolve(t) || hostTarget()`: un distro parado, o un id mal escrito
+  // desde una skill, reescribía las credenciales del HOST y devolvía ok.
+  assert.throws(() => swapLib.asTarget('wsl:no-existe'), /Target desconocido/);
+  assert.strictEqual(swapLib.asTarget('host').id, 'host');
+  assert.strictEqual(swapLib.asTarget(undefined).id, 'host');
+});
+
 check('el rollback restaura ~/.claude.json con escritura atómica, no copyFileSync', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-rb-'));
   const previous = process.env.CLAUDE_CONFIG_DIR;
@@ -590,6 +598,89 @@ async function checkAsync(name, fn) {
       else process.env.CLAUDE_CONFIG_DIR = previous;
       delete require.cache[require.resolve('./lib/credentials')];
       fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  await checkAsync('dos swaps a la vez: el segundo se rechaza en vez de entrelazarse con el primero', async () => {
+    // El monitor de rotación y un swap manual pueden coincidir; sin esto ambos hacían
+    // backup/escritura/verificación/rollback sobre los mismos dos ficheros.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-lock-'));
+    const target = {
+      id: 'host', kind: 'host', label: 'test',
+      claudeJsonPath: path.join(tmp, '.claude.json'),
+      credentialsPath: path.join(tmp, '.credentials.json'),
+      fileBackend: true,
+    };
+    fs.writeFileSync(target.credentialsPath, JSON.stringify({ claudeAiOauth: { accessToken: 'OLD', refreshToken: 'R', expiresAt: 1, scopes: ['s'] } }));
+    fs.writeFileSync(target.claudeJsonPath, JSON.stringify({ oauthAccount: { accountUuid: 'old' } }));
+    const account = {
+      id: 'acc_lock', label: 'Lock', email: null,
+      oauth: { accessToken: 'NEW', refreshToken: null, expiresAt: Date.now() + 1e9, scopes: ['user:inference'] },
+    };
+    const store = { get: (id) => (id === account.id ? account : null), setActive() {}, canReadUsage: () => false, publicAccount: (x) => ({ id: x.id, label: x.label }) };
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    const deps = {
+      store,
+      usage: { invalidate() {}, prime: (_, v) => v, normalize: (raw) => raw, fetchRaw: async () => ({}) },
+      oauth: { probeToken: async () => { await gate; return { kind: 'inference' }; } },
+    };
+    try {
+      const first = swapLib.swapTo(account.id, deps, target);
+      // The lock is taken synchronously, so the second call is refused even with the gate
+      // already open - and it has to be open: without the lock the second swap would park on
+      // it and the suite would hang instead of failing.
+      release();
+      await assert.rejects(swapLib.swapTo(account.id, deps, target), /en curso/);
+      assert.strictEqual((await first).ok, true);
+      // Y una vez terminado, el siguiente vuelve a entrar.
+      assert.strictEqual((await swapLib.swapTo(account.id, deps, target)).ok, true);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  await checkAsync('la rotación automática excluye un token rechazado y no reintenta cada tick un swap fallido', async () => {
+    const auto = require('./lib/auto');
+    auto.save({ enabled: true, target: 'host', threshold: 90, lastSwapAt: 0 });
+    const live = { accessToken: 't', expiresAt: Date.now() + 1e6 };
+    const accounts = [
+      { id: 'cur', label: 'Cur', oauth: { ...live } },
+      { id: 'dead', label: 'Dead', oauth: { ...live } },
+      { id: 'sana', label: 'Sana', oauth: { ...live } },
+    ];
+    const readings = {
+      cur: { ok: true, session: { percent: 95 }, weekly: { percent: 10 } },
+      // 401 al leer su uso: credencial muerta. Antes contaba como "uso desconocido" y era
+      // elegible, así que el monitor rotaba a ella, el verify fallaba, y vuelta a empezar.
+      dead: { ok: false, status: 401, needsRelogin: true },
+      sana: { ok: true, session: { percent: 5 }, weekly: { percent: 5 } },
+    };
+    const store = { list: () => accounts, get: (id) => accounts.find((a) => a.id === id) || null, activeFor: () => 'cur' };
+    const usage = {
+      fetchFor: async (a) => readings[a.id],
+      fetchAll: async (list) => Object.fromEntries(list.map((a) => [a.id, readings[a.id]])),
+      cachedFor: (id) => readings[id],
+    };
+    const calls = [];
+    const swap = {
+      asTarget: () => ({ claudeJsonPath: path.join(SANDBOX, 'no-existe.json') }),
+      swapTo: async (id) => { calls.push(id); throw new Error('verify falló'); },
+    };
+    try {
+      // Only a dead account to rotate into: nothing is tried, swapTo is not even called.
+      const onlyDead = { ...store, list: () => accounts.filter((a) => a.id !== 'sana') };
+      const r = await auto.tick({ store: onlyDead, usage, swap });
+      assert.strictEqual(r && r.rotated, false, 'un token rechazado no es candidato');
+      assert.deepStrictEqual(calls, [], 'ni siquiera se intenta el swap');
+
+      await assert.rejects(auto.tick({ store, usage, swap }), /verify falló/);
+      assert.deepStrictEqual(calls, ['sana'], 'rota a la cuenta sana, nunca a la del token rechazado');
+      assert.strictEqual(await auto.tick({ store, usage, swap }), null, 'un swap fallido arma el cooldown igual');
+      assert.strictEqual(calls.length, 1, 'no se reintenta en el tick siguiente');
+      assert.ok(auto.load().lastSwapAt > 0);
+    } finally {
+      auto.save({ enabled: false, target: 'host', threshold: 90, lastSwapAt: 0 });
     }
   });
 

@@ -146,14 +146,14 @@ Press **swap**:
 2. Backs up credentials and `~/.claude.json` to `data/backups/` (last 20).
 3. Refreshes the token if it is about to expire.
 4. Rewrites **only** `claudeAiOauth` and `oauthAccount`. Projects, history and `mcpOAuth` are untouched.
-5. Verifies against the API and **rolls both files back** on any failure.
+5. Verifies against the API and **rolls both files back** if the token is rejected (401/403). A rate limit or a network failure keeps the swap and says it could not be confirmed.
 
 ## Environments
 
 The tabs are the places a swap can write: the host, named after its OS, and every WSL distro.
-Nothing to configure - it runs `wsl.exe -l -q` and takes what comes back.
+Nothing to configure - it runs `wsl.exe -l -q --running` and takes what comes back.
 
-- Skips system distros (`docker-desktop`) and any distro where Claude Code has never run - checked by resolving `$HOME` and looking for `~/.claude.json` over the share.
+- Lists only distros that are **running** - a scan must not boot the stopped ones - and skips system distros (`docker-desktop`) and any distro where Claude Code has never run, checked by resolving `$HOME` and looking for `~/.claude.json` over the share.
 - Detection is cached 30 s. The **↻** beside the tabs re-scans past it, and says when nothing changed.
 - A dot means Claude Code is running there. Each environment tracks its own active account.
 - WSL is a Windows feature; elsewhere there is one tab.
@@ -195,7 +195,7 @@ moment its 5-hour session reaches **90%**, swaps to the freshest account that st
 your next `claude` launch lands on capacity you have not spent. It only rotates into an account
 below the threshold in both windows; if none qualifies it stays put. State is on disk, so it
 survives a restart, and it is the same audited swap (backup, verify, roll back) as a manual one.
-Turn it off with `/swapper-auto off`.
+Turn it off with `/swapper-auto off`. An account whose token is rejected is left out of the queue, and a rotation that fails waits out the same cooldown as one that succeeds, so a dead credential is never retried every three minutes.
 
 ### Install
 

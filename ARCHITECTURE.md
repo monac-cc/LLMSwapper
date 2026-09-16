@@ -317,10 +317,10 @@ environment), so `/api/usage*` take no target.
 
 `lib/auto.js` is an on/off monitor, off by default, its state persisted to `data/auto.json`.
 When on, a 3-minute interval reads the active account's usage — cache-gated, so a real API call
-only every ~15 min — and does nothing until the 5-hour session crosses the threshold (default
+only every ~4 min — and does nothing until the 5-hour session crosses the threshold (default
 90%). Only then does it sweep the other accounts to rank them, and swap to the freshest one that
 has room in **both** windows below the threshold; if none qualifies it stays put. A cooldown
-(3 min) after any rotation stops it swapping twice while readings lag. The swap is the ordinary
+(5 min) after any rotation stops it swapping twice while readings lag. A rotation that fails arms the same cooldown, and an account whose last reading was a 401/403 is excluded from the queue as `token rechazado`, so a dead credential is never retried every tick. Swaps are serialised: a second `swapTo` while one is in flight - a manual one overlapping the monitor - is refused with 409 rather than interleaved. The swap is the ordinary
 `swap.swapTo` path — backup, verify, roll back — so "when" is the only thing this module decides;
 "how" is unchanged. The three `/swapper*` skills (`skills/`) are thin clients of these endpoints.
 

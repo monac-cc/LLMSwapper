@@ -239,7 +239,8 @@ async function handleApi(req, res, url, port) {
     try {
       return send(res, 200, await swap.swapTo(id, deps, target));
     } catch (err) {
-      return fail(res, 500, err.message);
+      // 400 for a target that does not resolve, 409 for a swap already in flight; 500 otherwise.
+      return fail(res, err.status || 500, err.message);
     }
   }
 
@@ -252,6 +253,7 @@ async function handleApi(req, res, url, port) {
   if (pathname === '/api/accounts/import' && method === 'POST') {
     const { configDir, target } = await readBody(req);
     const tgId = target || 'host';
+    if (!targets.resolve(tgId)) return fail(res, 400, `Target desconocido: ${tgId}`);
     const identity = swap.readCurrentIdentity(configDir, tgId);
     if (!identity) {
       const tg = targets.resolve(tgId);
@@ -413,7 +415,7 @@ async function handleApi(req, res, url, port) {
 const KEEPALIVE_EVERY_MS = 6 * 60 * 60 * 1000;   // every 6h
 const REFRESH_WHEN_UNDER_MS = 24 * 60 * 60 * 1000; // renew if under a day of life left
 // How often the auto-rotation monitor looks. The active-account usage read is cache-gated
-// (a real call only every ~15 min), so a 3-minute look is cheap and reacts promptly.
+// (a real call only every ~4 min), so a 3-minute look is cheap and reacts promptly.
 const AUTO_EVERY_MS = 3 * 60 * 1000;
 
 async function keepTokensAlive() {
