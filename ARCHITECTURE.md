@@ -256,7 +256,7 @@ A **target** is where a swap writes. `lib/targets.js` enumerates them:
   macOS, file elsewhere).
 - `wsl:<distro>` - a WSL distro that has Claude installed, reached over its file share:
   `\\wsl.localhost\<distro>\home\<user>\.claude.json` and `…\.claude\.credentials.json`.
-  WSL is Linux, so it is always the plain-file backend. Detection runs `wsl.exe -l -q`,
+  WSL is Linux, so it is always the plain-file backend. Detection runs `wsl.exe -l -q --running` - the stopped distros are left alone, since the `wsl -d` that follows would boot them -,
   reads each distro's `$HOME`, and includes it only if `~/.claude.json` is reachable over
   the share - which simultaneously proves the distro is running and that Claude lives there.
   Detection is cached ~30s (it spawns several `wsl.exe` calls) and only happens on Windows.
