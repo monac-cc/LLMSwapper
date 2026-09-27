@@ -21,7 +21,8 @@ function check(name, fn) {
 
 console.log('\nLLMSwapper self-check\n');
 
-for (const mod of ['lib/paths.js', 'lib/store.js', 'lib/usage.js', 'lib/swap.js', 'lib/credentials.js', 'lib/targets.js', 'lib/terminal.js', 'lib/auto.js']) {
+for (const mod of ['lib/paths.js', 'lib/store.js', 'lib/usage.js', 'lib/swap.js', 'lib/credentials.js', 'lib/targets.js', 'lib/terminal.js', 'lib/auto.js',
+  'lib/codex/auth.js', 'lib/codex/store.js', 'lib/codex/targets.js', 'lib/codex/usage.js', 'lib/codex/swap.js', 'lib/codex/routes.js']) {
   check(`${mod} module self-check`, () => {
     execFileSync(process.execPath, [path.join(__dirname, mod)], { stdio: 'pipe', timeout: 30000 });
   });
@@ -132,6 +133,23 @@ check('scrub() removes tokens from anything headed for a log or a response', () 
   assert.ok(!oauth.scrub(dirty).includes('AbC_dEf'));
   assert.ok(oauth.scrub(dirty).includes('sk-ant-***'));
   assert.strictEqual(oauth.scrub(null), '');
+});
+
+check('scrub() also redacts OpenAI JWTs and refresh tokens', () => {
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const jwt = `${b64({ alg: 'RS256' })}.${b64({ email: 'x@y.z' })}.${'s'.repeat(40)}`;
+  const rt = `rt.A.${'q'.repeat(120)}`;
+  const out = oauth.scrub(`bad ${jwt} and ${rt} end`);
+  assert.ok(!out.includes(jwt) && !out.includes(rt), out);
+  assert.match(out, /eyJ\*\*\*/);
+  assert.strictEqual(oauth.scrub('sk-ant-oat01-abc'), 'sk-ant-***', 'Claude behaviour unchanged');
+});
+
+check('lib/usage y lib/targets exportan lo que reutiliza lib/codex', () => {
+  const targets = require('./lib/targets');
+  assert.deepStrictEqual(usage.meter(12, 'T'), { percent: 12, resetsAt: 'T', severity: 'normal' });
+  assert.strictEqual(usage.num('7.25'), 7.3);
+  for (const fn of ['runWsl', 'wslPath', 'uncBaseCandidates']) assert.strictEqual(typeof targets[fn], 'function', fn);
 });
 
 check('expires_in seconds becomes an absolute ms epoch', () => {
@@ -541,11 +559,13 @@ check('no source file hardcodes a token', () => {
   const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => {
     if (d.name === 'node_modules' || d.name === 'data' || d.name === '.git') return [];
     const full = path.join(dir, d.name);
-    return d.isDirectory() ? walk(full) : /\.(js|html|css|md)$/.test(d.name) ? [full] : [];
+    return d.isDirectory() ? walk(full) : /\.(js|mjs|html|css|md)$/.test(d.name) ? [full] : [];
   });
   for (const file of walk(__dirname)) {
     const text = fs.readFileSync(file, 'utf8');
-    const hit = text.match(/sk-ant-(oat|ort)01-[A-Za-z0-9_-]{10,}/);
+    const hit = text.match(/sk-ant-(oat|ort)01-[A-Za-z0-9_-]{10,}/)
+      // An OpenAI access or id token (Codex). Fixtures build theirs at runtime.
+      || text.match(/eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/);
     assert.ok(!hit, `${path.relative(__dirname, file)} contains what looks like a real token`);
   }
 });
@@ -1410,6 +1430,35 @@ async function checkAsync(name, fn) {
       'el comando debe estar en constantes');
   });
 
+  check('el login de Codex lleva el directorio una sola vez, y bien entrecomillado en cada plataforma', () => {
+    const terminal = require('./lib/terminal');
+    assert.strictEqual(typeof terminal.codexInstalled(), 'boolean');
+    const dir = "/tmp/panel data/it's here";
+    // Windows: through the environment, so there is nothing for cmd.exe to re-parse.
+    const win = terminal.codexLoginCommand('win32', dir);
+    assert.ok(win.args.every((a) => typeof a === 'string'));
+    assert.strictEqual(win.env.CODEX_HOME, dir);
+    assert.ok(!win.args.some((a) => a.includes(dir)), 'the directory never reaches the command line');
+    assert.ok(win.args.includes('codex login'));
+    // macOS and Linux: one shell line, the directory single-quoted exactly once.
+    for (const platform of ['darwin', 'linux']) {
+      const cmd = terminal.codexLoginCommand(platform, dir);
+      assert.ok(cmd.args.every((a) => typeof a === 'string'), `${platform}: argv of strings`);
+      assert.strictEqual(cmd.sh.split(terminal.shQuote(dir)).length - 1, 1, `${platform}: the directory exactly once`);
+      assert.match(cmd.sh, /^CODEX_HOME='.*' codex login/);
+    }
+    // AppleScript gets that same line back once its own escaping is undone.
+    const mac = terminal.codexLoginCommand('darwin', dir);
+    const script = mac.args[1].match(/do script "((?:[^"\\]|\\.)*)"$/);
+    assert.ok(script, mac.args[1]);
+    assert.strictEqual(script[1].replace(/\\(.)/g, '$1'), mac.sh);
+    // The shell quoting round-trips, where there is a shell to ask.
+    if (terminal.existeEnPath('sh')) {
+      const out = execFileSync('sh', ['-c', `printf %s ${terminal.shQuote(dir)}`], { encoding: 'utf8' });
+      assert.strictEqual(out, dir);
+    }
+  });
+
   await checkAsync('PATCH /api/accounts/:id renombra, y rechaza lo que no es un nombre', async () => {
     const realFetch = global.fetch;
     const server = require('./server').createServer(7997);
@@ -1445,6 +1494,650 @@ async function checkAsync(name, fn) {
     }
   });
 
+  /* ---------------- Codex ---------------- */
+
+  // Nothing here may read or write the real ~/.codex or a WSL one: CODEX_HOME points at a temp
+  // dir, and target discovery is replaced by that host alone (the real list() would find the
+  // WSL distros). Every JWT is built at runtime, and every network call is a stub.
+  const CODEX_TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-codex-'));
+  const realFetchForTests = global.fetch;
+  process.env.CODEX_HOME = path.join(CODEX_TMP, 'host-home');
+  const codexAuth = require('./lib/codex/auth');
+  const codexStore = require('./lib/codex/store');
+  const codexTargets = require('./lib/codex/targets');
+  const codexUsage = require('./lib/codex/usage');
+  let codexTargetList = [codexTargets.hostTarget()];
+  codexTargets.list = () => codexTargetList;
+
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const fakeJwt = (payload) => `${b64({ alg: 'RS256', typ: 'JWT' })}.${b64(payload)}.${'s'.repeat(43)}`;
+  const AUTH_CLAIM = 'https://api.openai.com/auth';
+  let rtSeq = 0;
+  /** An auth.json `tokens` block for a ChatGPT workspace, as Codex would write it. */
+  const codexTokens = (accountId, { email = `${accountId}@x.test`, expSecs = 240 * 3600, rt } = {}) => {
+    const claim = { chatgpt_account_id: accountId, chatgpt_plan_type: 'plus', chatgpt_user_id: `user-${accountId}` };
+    return {
+      id_token: fakeJwt({ email, [AUTH_CLAIM]: claim }),
+      access_token: fakeJwt({ exp: Math.floor(Date.now() / 1000) + expSecs, n: ++rtSeq, [AUTH_CLAIM]: claim }),
+      refresh_token: rt || `rt.a.${accountId}-${rtSeq}`,
+      account_id: accountId,
+    };
+  };
+  const addCodexAccount = (accountId, opts) => {
+    const tokens = codexTokens(accountId, opts);
+    const who = codexAuth.identity(tokens);
+    return codexStore.add({ accountId, email: who.email, plan: who.plan, oauth: codexAuth.toStored(tokens, new Date().toISOString()) });
+  };
+  const codexTarget = (name) => {
+    const home = path.join(CODEX_TMP, name);
+    return { id: `dir:${name}`, kind: 'dir', label: name, home, authPath: path.join(home, 'auth.json') };
+  };
+  const res = (status, body, headers = {}) => ({
+    ok: status >= 200 && status < 300, status,
+    headers: { get: (h) => headers[h.toLowerCase()] ?? null },
+    text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
+  });
+  const nowS = () => Math.floor(Date.now() / 1000);
+  const FIVE_H = { used_percent: 12, limit_window_seconds: 18000, reset_after_seconds: 3600, reset_at: nowS() + 3600 };
+  const WEEK = { used_percent: 2, limit_window_seconds: 604800, reset_after_seconds: 86400, reset_at: nowS() + 86400 };
+  const whamBody = (primary, secondary) => ({ plan_type: 'plus', rate_limit: { allowed: true, limit_reached: false, primary_window: primary, secondary_window: secondary } });
+
+  await checkAsync('codex: el uso se mapea por la longitud de la ventana, 401 pide login y un 429 sirve la última lectura', async () => {
+    const realFetch = global.fetch;
+    const calls = [];
+    try {
+      codexUsage.invalidate();
+      codexUsage.resetCooldown();
+      const acc = addCodexAccount('acct-usage');
+      global.fetch = async (url, opts) => { calls.push({ url: String(url), headers: opts.headers }); return res(200, whamBody(FIVE_H, WEEK)); };
+      const r = await codexUsage.fetchFor(acc, { force: true });
+      assert.strictEqual(r.ok, true);
+      assert.strictEqual(r.session.percent, 12);
+      assert.strictEqual(r.weekly.percent, 2);
+      assert.strictEqual(r.session.resetsAt, new Date(FIVE_H.reset_at * 1000).toISOString());
+      assert.strictEqual(calls[0].url, codexUsage.USAGE_URL);
+      assert.strictEqual(calls[0].headers.Authorization, `Bearer ${acc.oauth.accessToken}`);
+      assert.strictEqual(calls[0].headers['ChatGPT-Account-ID'], 'acct-usage');
+      assert.strictEqual(calls[0].headers.originator, 'codex_cli_rs');
+
+      // Order does not decide: a weekly window reported first is still the weekly meter.
+      const swapped = codexUsage.normalize(whamBody(WEEK, FIVE_H), 'x');
+      assert.strictEqual(swapped.session.percent, 12);
+      assert.strictEqual(swapped.weekly.percent, 2);
+      // With no window lengths at all, fall back to position.
+      const bare = codexUsage.normalize(whamBody({ used_percent: 5 }, { used_percent: 6 }), 'x');
+      assert.deepStrictEqual([bare.session.percent, bare.weekly.percent], [5, 6]);
+
+      // A cached reading is served without a call.
+      assert.strictEqual((await codexUsage.fetchFor(acc)).session.percent, 12);
+      assert.strictEqual(calls.length, 1);
+
+      // 429 after a good read: the good numbers, flagged stale, and a backoff that holds.
+      codexUsage.resetCooldown();
+      global.fetch = async () => { calls.push(1); return res(429, 'slow down'); };
+      const stale = await codexUsage.fetchFor(acc, { force: true });
+      assert.strictEqual(stale.ok, true);
+      assert.strictEqual(stale.stale, true);
+      assert.strictEqual(stale.staleReason, 'rate-limited');
+      assert.strictEqual(stale.session.percent, 12);
+      const before = calls.length;
+      const again = await codexUsage.fetchFor(acc, { force: true });
+      assert.strictEqual(calls.length, before, 'no call inside the backoff');
+      assert.strictEqual(again.stale, true);
+
+      // 401: the token is dead, never hidden behind stale numbers.
+      codexUsage.resetCooldown();
+      global.fetch = async () => res(401, { error: { message: `bad token ${acc.oauth.accessToken}` } });
+      const dead = await codexUsage.fetchFor(acc, { force: true });
+      assert.strictEqual(dead.ok, false);
+      assert.strictEqual(dead.needsRelogin, true);
+      assert.ok(!JSON.stringify(dead).includes(acc.oauth.accessToken), 'the error must not carry the token');
+      assert.match(dead.error, /eyJ\*\*\*/, 'scrubbed, not dropped');
+
+      // A Cloudflare challenge is a 403 with an HTML page: about the client, not the token. It must
+      // not mark the account "sign in again".
+      codexUsage.resetCooldown();
+      global.fetch = async () => res(403, '<!DOCTYPE html><html><title>Just a moment...</title></html>');
+      const challenged = await codexUsage.fetchFor(acc, { force: true });
+      assert.notStrictEqual(challenged.needsRelogin, true, 'a bot challenge is not a dead token');
+      assert.strictEqual(challenged.stale, true, 'the last good reading is served, flagged stale');
+      assert.match(challenged.error || challenged.staleReason || '', /Cloudflare/);
+    } finally {
+      global.fetch = realFetch;
+      codexUsage.invalidate();
+      codexUsage.resetCooldown();
+    }
+  });
+
+  const codexSwap = require('./lib/codex/swap');
+  // The usage endpoint answering `status` (default 200) and the token endpoint failing loudly: a
+  // swap test that reaches auth.openai.com without asking for it is a bug in the test.
+  const stubCodexNet = (status = 200) => async (url) => {
+    if (String(url) === codexUsage.USAGE_URL) return status === 200 ? res(200, whamBody(FIVE_H, WEEK)) : res(status, 'nope');
+    throw new Error(`unexpected call to ${url}`);
+  };
+  /** Runs fn with a clean store, fresh targets and stubbed network, then puts everything back. */
+  const withCodex = async (targetNames, fn, net = stubCodexNet()) => {
+    const realFetch = global.fetch;
+    const realDetect = codexTargets.detectRunning;
+    const tgs = targetNames.map(codexTarget);
+    codexTargetList = tgs;
+    fs.rmSync(path.join(SANDBOX, 'codex'), { recursive: true, force: true });
+    for (const t of tgs) fs.rmSync(t.home, { recursive: true, force: true });
+    codexUsage.invalidate();
+    codexUsage.resetCooldown();
+    global.fetch = net;
+    try {
+      await fn(...tgs);
+    } finally {
+      global.fetch = realFetch;
+      codexTargets.detectRunning = realDetect;
+      codexTargetList = [codexTargets.hostTarget()];
+    }
+  };
+  const writeLive = (t, tokens, extra = {}) => {
+    fs.mkdirSync(t.home, { recursive: true });
+    fs.writeFileSync(t.authPath, JSON.stringify({ auth_mode: 'chatgpt', OPENAI_API_KEY: null, tokens, last_refresh: new Date().toISOString(), ...extra }, null, 2));
+  };
+  const readLive = (t) => JSON.parse(fs.readFileSync(t.authPath, 'utf8'));
+
+  await checkAsync('codex swap: crea auth.json en un entorno vacío y conserva las claves ajenas', async () => {
+    await withCodex(['empty'], async (t) => {
+      const a = addCodexAccount('acct-a');
+      const b = addCodexAccount('acct-b');
+      const r = await codexSwap.swapTo(a.id, t);
+      assert.strictEqual(r.ok, true);
+      assert.strictEqual(r.verified, true);
+      assert.strictEqual(r.target, t.id);
+      let live = readLive(t);
+      assert.strictEqual(live.auth_mode, 'chatgpt');
+      assert.strictEqual(live.tokens.account_id, 'acct-a');
+      assert.strictEqual(live.tokens.access_token, a.oauth.accessToken);
+      assert.ok(live.last_refresh, 'last_refresh is mandatory');
+      assert.strictEqual(codexStore.activeFor(t.id), a.id);
+      assert.ok(!JSON.stringify(r).includes(a.oauth.accessToken) && !JSON.stringify(r).includes(a.oauth.refreshToken), 'no token in the answer');
+      assert.strictEqual(codexUsage.cachedFor(a.id).session.percent, 12, 'the verify reading primes the cache');
+
+      fs.writeFileSync(t.authPath, JSON.stringify({ ...live, agent_identity: { keep: true } }));
+      await codexSwap.swapTo(b.id, t);
+      live = readLive(t);
+      assert.strictEqual(live.tokens.account_id, 'acct-b');
+      assert.deepStrictEqual(live.agent_identity, { keep: true }, 'a key the swap does not own survives');
+      assert.strictEqual(codexStore.activeFor(t.id), b.id);
+    });
+  });
+
+  await checkAsync('codex swap: un 401 al verificar deja auth.json como estaba, byte a byte, o sin crear', async () => {
+    await withCodex(['had', 'none'], async (had, none) => {
+      const a = addCodexAccount('acct-a');
+      const b = addCodexAccount('acct-b');
+      // The stored pair is what is live: same access token, so nothing to adopt.
+      writeLive(had, codexAuth.toTokens(a.oauth), { extra: 1 });
+      const before = fs.readFileSync(had.authPath);
+      await assert.rejects(codexSwap.swapTo(b.id, had), /401[\s\S]*restaurado/);
+      assert.ok(fs.readFileSync(had.authPath).equals(before), 'previous bytes restored');
+      assert.strictEqual(codexStore.activeFor(had.id), a.id, 'active is what the restored file holds, not b');
+
+      await assert.rejects(codexSwap.swapTo(b.id, none), /restaurado/);
+      assert.strictEqual(fs.existsSync(none.authPath), false, 'a target that had no auth.json is left with none');
+    }, stubCodexNet(401));
+  });
+
+  await checkAsync('codex swap: con Codex abierto avisa, y el store se queda el par rotado de la cuenta saliente', async () => {
+    await withCodex(['live'], async (t) => {
+      const a = addCodexAccount('acct-a');
+      const b = addCodexAccount('acct-b');
+      // Codex refreshed on its own: same account, new pair.
+      const rotated = codexTokens('acct-a');
+      writeLive(t, rotated);
+      codexTargets.detectRunning = () => ({ running: true, pids: [4242] });
+      const r = await codexSwap.swapTo(b.id, t);
+      assert.strictEqual(r.ok, true, 'an open Codex never blocks the swap');
+      assert.ok(r.warnings.some((w) => /abierto/.test(w) && /NUEVAS/.test(w)), r.warnings.join(' | '));
+      assert.strictEqual(codexStore.get(a.id).oauth.refreshToken, rotated.refresh_token, 'outgoing pair adopted');
+      assert.strictEqual(codexStore.get(a.id).oauth.accessToken, rotated.access_token);
+    });
+  });
+
+  await checkAsync('codex swap: una sesión viva que el store no conoce se importa antes de sobrescribirla', async () => {
+    await withCodex(['unknown'], async (t) => {
+      const b = addCodexAccount('acct-b');
+      writeLive(t, codexTokens('acct-stranger', { email: 'stranger@x.test' }));
+      const r = await codexSwap.swapTo(b.id, t);
+      const imported = codexStore.get(codexStore.idFor('acct-stranger'));
+      assert.ok(imported, 'the live session must not survive only in a backup');
+      assert.strictEqual(imported.email, 'stranger@x.test');
+      assert.ok(r.warnings.some((w) => /stranger@x\.test/.test(w)), 'and the answer says so');
+    });
+  });
+
+  await checkAsync('codex swap: una cuenta activa en un entorno se niega en otro (409)', async () => {
+    await withCodex(['x', 'y'], async (x, y) => {
+      const a = addCodexAccount('acct-a');
+      await codexSwap.swapTo(a.id, x);
+      await assert.rejects(codexSwap.swapTo(a.id, y), (e) => e.status === 409 && /x/.test(e.message));
+      assert.strictEqual(fs.existsSync(y.authPath), false, 'nothing written');
+      // Stale store evidence is not a conflict: x now holds another account.
+      writeLive(x, codexTokens('acct-other'));
+      assert.strictEqual((await codexSwap.swapTo(a.id, y)).ok, true);
+    });
+  });
+
+  await checkAsync('codex swap: almacenamiento en llavero se niega (409) sin escribir nada', async () => {
+    await withCodex(['kr'], async (t) => {
+      const a = addCodexAccount('acct-a');
+      fs.mkdirSync(t.home, { recursive: true });
+      fs.writeFileSync(path.join(t.home, 'config.toml'), 'cli_auth_credentials_store = "keyring"\n');
+      await assert.rejects(codexSwap.swapTo(a.id, t), (e) => e.status === 409 && /file/.test(e.message));
+      assert.strictEqual(fs.existsSync(t.authPath), false);
+      assert.strictEqual(fs.existsSync(path.join(SANDBOX, 'codex', 'backups')), false, 'not even a backup');
+    });
+  });
+
+  await checkAsync('codex swap: un auth.json a medio escribir se niega y no se pisa', async () => {
+    await withCodex(['half'], async (t) => {
+      const a = addCodexAccount('acct-a');
+      fs.mkdirSync(t.home, { recursive: true });
+      fs.writeFileSync(t.authPath, '{"auth_mode":"chatgpt","tok');
+      await assert.rejects(codexSwap.swapTo(a.id, t), /ilegible/);
+      assert.strictEqual(fs.readFileSync(t.authPath, 'utf8'), '{"auth_mode":"chatgpt","tok');
+    });
+  });
+
+  await checkAsync('codex swap: 400 entorno desconocido, 404 cuenta desconocida, 409 si ya hay uno en curso', async () => {
+    await withCodex(['lock'], async (t) => {
+      const a = addCodexAccount('acct-a');
+      await assert.rejects(codexSwap.swapTo(a.id, 'wsl:no-existe'), (e) => e.status === 400);
+      await assert.rejects(codexSwap.swapTo('cdx_000000', t), (e) => e.status === 404);
+      const first = codexSwap.swapTo(a.id, t);
+      await assert.rejects(codexSwap.swapTo(a.id, t), (e) => e.status === 409 && /en curso/.test(e.message));
+      assert.strictEqual((await first).ok, true);
+      assert.strictEqual((await codexSwap.swapTo(a.id, t)).ok, true, 'the lock is released afterwards');
+    });
+  });
+
+  await checkAsync('codex swap: los backups van a data/codex/backups, se podan a 20 y nunca tocan data/backups', async () => {
+    await withCodex(['bk'], async (t) => {
+      const a = addCodexAccount('acct-a');
+      const b = addCodexAccount('acct-b');
+      const claudeBackups = path.join(SANDBOX, 'backups');
+      fs.mkdirSync(claudeBackups, { recursive: true });
+      // More than MAX_BACKUPS of them: a pruner that also pruned data/backups would show here.
+      for (let i = 0; i < 25; i++) fs.mkdirSync(path.join(claudeBackups, `2020-01-01-claude-${String(i).padStart(2, '0')}`), { recursive: true });
+      const claudeBefore = fs.readdirSync(claudeBackups).sort();
+      for (let i = 0; i < 25; i++) await codexSwap.swapTo(i % 2 ? a.id : b.id, t);
+      const codexBackups = fs.readdirSync(path.join(SANDBOX, 'codex', 'backups'));
+      assert.strictEqual(codexBackups.length, 20);
+      assert.deepStrictEqual(fs.readdirSync(claudeBackups).sort(), claudeBefore, 'Claude backups untouched');
+      assert.ok(fs.existsSync(path.join(SANDBOX, 'codex', 'backups', codexBackups.sort()[19], 'auth.json')));
+    });
+  });
+
+  await checkAsync('codex import: desde staging guarda la cuenta y borra el auth.json de staging; una clave de API se rechaza', async () => {
+    await withCodex([], async () => {
+      const staging = codexSwap.stagingDir();
+      assert.strictEqual(staging, path.join(SANDBOX, 'codex', 'login'));
+      await assert.rejects(codexSwap.importFrom({ staging: true }), (e) => e.status === 404);
+      writeLive({ home: staging, authPath: path.join(staging, 'auth.json') }, codexTokens('acct-new', { email: 'new@x.test' }));
+      const acc = await codexSwap.importFrom({ staging: true });
+      assert.strictEqual(acc.email, 'new@x.test');
+      assert.strictEqual(acc.plan, 'plus');
+      assert.strictEqual(fs.existsSync(path.join(staging, 'auth.json')), false, 'staging file deleted');
+      assert.strictEqual(codexStore.activeTargetsOf(acc.id).length, 0, 'a staging import is not live anywhere');
+
+      const other = path.join(CODEX_TMP, 'apikey-home');
+      fs.mkdirSync(other, { recursive: true });
+      fs.writeFileSync(path.join(other, 'auth.json'), JSON.stringify({ auth_mode: 'apikey', OPENAI_API_KEY: 'x' }));
+      await assert.rejects(codexSwap.importFrom({ configDir: other }), (e) => e.status === 400 && /clave de API/.test(e.message));
+    });
+  });
+
+  await checkAsync('codex import: la sesión viva de un entorno se importa y queda activa ahí', async () => {
+    await withCodex(['imp'], async (t) => {
+      writeLive(t, codexTokens('acct-live'));
+      const acc = await codexSwap.importFrom({ target: t });
+      assert.strictEqual(codexStore.activeFor(t.id), acc.id);
+      assert.strictEqual(codexSwap.detectActiveId(t.id), acc.id);
+      assert.ok(fs.existsSync(t.authPath), 'a live import never deletes the live file');
+    });
+  });
+
+  await checkAsync('codex refresh: un token caducado se renueva, se guarda y se devuelve al auth.json que tenía el viejo', async () => {
+    const posted = [];
+    let fresh;
+    const net = async (url, opts) => {
+      if (String(url) === codexAuth.TOKEN_URL) {
+        posted.push(JSON.parse(opts.body));
+        fresh = codexTokens('acct-a');
+        return res(200, { id_token: fresh.id_token, access_token: fresh.access_token, refresh_token: fresh.refresh_token });
+      }
+      return stubCodexNet()(url);
+    };
+    await withCodex(['holder'], async (t) => {
+      // 60 s left and live in t: the Codex there refreshes at this same margin, so the panel
+      // must not race it for the refresh token.
+      const soon = addCodexAccount('acct-soon', { expSecs: 60 });
+      writeLive(t, codexAuth.toTokens(soon.oauth));
+      assert.strictEqual((await codexSwap.ensureFresh(codexStore.get(soon.id))).oauth.refreshToken, soon.oauth.refreshToken);
+      assert.strictEqual(posted.length, 0, 'a live account with time left is not refreshed');
+
+      // Past exp: that Codex is not refreshing it, so the panel does and hands the pair back.
+      const a = addCodexAccount('acct-a', { expSecs: -60 });
+      writeLive(t, codexAuth.toTokens(a.oauth), { agent_identity: { keep: 1 } });
+      const out = await codexSwap.ensureFresh(codexStore.get(a.id));
+      assert.deepStrictEqual(posted, [{ client_id: codexAuth.CLIENT_ID, grant_type: 'refresh_token', refresh_token: a.oauth.refreshToken }]);
+      assert.strictEqual(out.oauth.refreshToken, fresh.refresh_token);
+      assert.strictEqual(codexStore.get(a.id).oauth.refreshToken, fresh.refresh_token, 'stored before anything else');
+      const live = readLive(t);
+      assert.strictEqual(live.tokens.refresh_token, fresh.refresh_token, 'handed back to the file that held the old one');
+      assert.strictEqual(live.tokens.account_id, 'acct-a', 'account_id kept although the endpoint does not return it');
+      assert.deepStrictEqual(live.agent_identity, { keep: 1 });
+      // Not due: no call at all.
+      await codexSwap.ensureFresh(codexStore.get(a.id));
+      assert.strictEqual(posted.length, 1);
+    }, net);
+  });
+
+  await checkAsync('codex refresh: un refresh token rechazado marca la cuenta como muerta y el keep-alive no la reintenta', async () => {
+    let calls = 0;
+    const net = async (url) => {
+      if (String(url) === codexAuth.TOKEN_URL) { calls++; return res(400, { error: { code: 'refresh_token_reused' } }); }
+      return stubCodexNet()(url);
+    };
+    await withCodex(['kd'], async (t) => {
+      const a = addCodexAccount('acct-a', { expSecs: 60 });
+      await assert.rejects(codexSwap.ensureFresh(a), (e) => e.permanent === true);
+      assert.ok(codexStore.get(a.id).dead, 'marked dead');
+      assert.strictEqual(codexStore.publicAccount(a.id).tokenExpired, true);
+      const u = await codexUsage.fetchFor(codexStore.get(a.id), { force: true });
+      assert.strictEqual(u.needsRelogin, true);
+
+      // Dead with days of access token left (the keep-alive marks them under 2 days), and a
+      // good reading cached: the row still says "sign in again", and it cannot be swapped in.
+      const d = addCodexAccount('acct-d');
+      codexUsage.prime(d.id, codexUsage.normalize(whamBody(FIVE_H, WEEK), d.id));
+      codexStore.update(d.id, { dead: 'refresh_token_reused' });
+      const du = await codexUsage.fetchFor(codexStore.get(d.id));
+      assert.strictEqual(du.ok, false);
+      assert.strictEqual(du.needsRelogin, true, 'not the cached reading');
+      await assert.rejects(codexSwap.swapTo(d.id, t), (e) => e.status === 409);
+      assert.strictEqual(fs.existsSync(t.authPath), false, 'nothing written');
+      const r = await codexSwap.keepAliveTick();
+      assert.strictEqual(calls, 1, 'a dead account is never retried');
+      assert.deepStrictEqual(r.refreshed, []);
+      assert.deepStrictEqual(r.failed, [], 'skipped, not tried and failed');
+    }, net);
+  });
+
+  await checkAsync('codex keep-alive: adopta el par vivo, renueva solo las cuentas ociosas cerca de caducar', async () => {
+    const refreshedWith = [];
+    const net = async (url, opts) => {
+      if (String(url) === codexAuth.TOKEN_URL) {
+        refreshedWith.push(JSON.parse(opts.body).refresh_token);
+        const f = codexTokens('acct-idle');
+        return res(200, { id_token: f.id_token, access_token: f.access_token, refresh_token: f.refresh_token });
+      }
+      return stubCodexNet()(url);
+    };
+    await withCodex(['ka'], async (t) => {
+      const live = addCodexAccount('acct-live', { expSecs: 3600 });
+      const idle = addCodexAccount('acct-idle', { expSecs: 3600 });
+      const healthy = addCodexAccount('acct-healthy');
+      const rotated = codexTokens('acct-live', { expSecs: 3600 });
+      writeLive(t, rotated);
+      const r = await codexSwap.keepAliveTick();
+      assert.deepStrictEqual(refreshedWith, [idle.oauth.refreshToken], 'only the idle, near-expiry account');
+      assert.strictEqual(codexStore.get(live.id).oauth.refreshToken, rotated.refresh_token, 'live pair adopted, not refreshed');
+      assert.strictEqual(r.refreshed.length, 1);
+      assert.strictEqual(codexStore.get(healthy.id).oauth.refreshToken, healthy.oauth.refreshToken);
+    }, net);
+  });
+
+  // A token endpoint that answers a fresh pair for `accountId`, recording the refresh tokens spent.
+  const tokenEndpoint = (accountId, spent, before) => async (url, opts) => {
+    if (String(url) === codexAuth.TOKEN_URL) {
+      spent.push(JSON.parse(opts.body).refresh_token);
+      if (before) await before();
+      const f = codexTokens(accountId);
+      return res(200, { id_token: f.id_token, access_token: f.access_token, refresh_token: f.refresh_token });
+    }
+    return stubCodexNet()(url);
+  };
+
+  await checkAsync('codex refresh: lecturas de uso y keep-alive a la vez gastan el refresh token una sola vez', async () => {
+    const spent = [];
+    await withCodex([], async () => {
+      const a = addCodexAccount('acct-a', { expSecs: 60 });
+      const [r1, r2, ka] = await Promise.all([
+        codexUsage.fetchFor(a, { force: true }), codexUsage.fetchFor(a, { force: true }), codexSwap.keepAliveTick(),
+      ]);
+      assert.deepStrictEqual(spent, [a.oauth.refreshToken], 'one POST, one refresh token');
+      assert.ok(r1.ok && r2.ok, `${r1.error || ''} ${r2.error || ''}`);
+      assert.deepStrictEqual(ka.failed, []);
+      assert.strictEqual(codexStore.get(a.id).dead, null);
+    }, tokenEndpoint('acct-a', spent, () => new Promise((r) => setTimeout(r, 20))));
+  });
+
+  await checkAsync('codex: una cuenta adoptada en un WSL que luego se para sigue contando como activa ahí (409)', async () => {
+    await withCodex(['wsl', 'hostx'], async (wsl, host) => {
+      const a = addCodexAccount('acct-a');
+      // The user logged in natively inside that distro: a newer pair of the same account.
+      writeLive(wsl, codexTokens('acct-a', { expSecs: 241 * 3600 }));
+      await codexSwap.keepAliveTick();
+      assert.deepStrictEqual(codexStore.activeTargetsOf(a.id), [wsl.id], 'adopting records where it is live');
+      codexTargetList = [host]; // the distro stopped when idle: off the list, its file unseen
+      await assert.rejects(codexSwap.swapTo(a.id, host), (e) => e.status === 409 && e.message.includes(wsl.id));
+      assert.strictEqual(fs.existsSync(host.authPath), false, 'nothing written');
+      // Back, and holding another account: the record follows the file.
+      codexTargetList = [wsl, host];
+      writeLive(wsl, codexTokens('acct-other'));
+      assert.strictEqual(codexSwap.detectActiveId(wsl.id), null);
+      assert.strictEqual((await codexSwap.swapTo(a.id, host)).ok, true);
+    });
+  });
+
+  await checkAsync('codex swap: si Codex rota el par saliente mientras se renueva el entrante, el store se queda el nuevo', async () => {
+    const spent = [];
+    let t;
+    let rotated;
+    // What the Codex open there does during the incoming account's refresh: rotate the outgoing one.
+    const codexRotates = async () => { rotated = codexTokens('acct-a', { expSecs: 241 * 3600 }); writeLive(t, rotated); };
+    await withCodex(['rot'], async (tg) => {
+      t = tg;
+      const a = addCodexAccount('acct-a');
+      const b = addCodexAccount('acct-b', { expSecs: 60 });
+      writeLive(t, codexAuth.toTokens(a.oauth));
+      assert.strictEqual((await codexSwap.swapTo(b.id, t)).ok, true);
+      assert.deepStrictEqual(spent, [b.oauth.refreshToken]);
+      assert.strictEqual(codexStore.get(a.id).oauth.refreshToken, rotated.refresh_token, 'not only in the backup');
+      assert.strictEqual(readLive(t).tokens.account_id, 'acct-b');
+    }, tokenEndpoint('acct-b', spent, codexRotates));
+  });
+
+  await checkAsync('codex: un auth.json que se quedó atrás tras un refresh recibe el par del store, salvo si la cuenta vive en otro sitio', async () => {
+    await withCodex(['lag', 'other'], async (t, other) => {
+      const a = addCodexAccount('acct-a', { expSecs: 200 * 3600 });
+      writeLive(t, codexAuth.toTokens(a.oauth), { agent_identity: { keep: 1 } });
+      // The panel refreshed, and handing the pair back to t failed.
+      const newer = codexTokens('acct-a');
+      codexStore.update(a.id, { oauth: codexAuth.toStored(newer, 'LR') });
+      await codexSwap.keepAliveTick();
+      const live = readLive(t);
+      assert.strictEqual(live.tokens.refresh_token, newer.refresh_token, 'caught up');
+      assert.deepStrictEqual(live.agent_identity, { keep: 1 });
+
+      // Live in another environment too: a second holder of that pair would be worse than a lag.
+      writeLive(t, codexAuth.toTokens(a.oauth));
+      writeLive(other, newer);
+      await codexSwap.keepAliveTick();
+      assert.strictEqual(readLive(t).tokens.refresh_token, a.oauth.refreshToken);
+    });
+  });
+
+  await checkAsync('codex: un par guardado que OpenAI rechazó no protege contra uno más antiguo pero válido', async () => {
+    await withCodex(['old'], async (t) => {
+      const a = addCodexAccount('acct-a');
+      codexStore.update(a.id, { dead: 'refresh_token_reused' });
+      const older = codexTokens('acct-a', { expSecs: 100 * 3600 });
+      writeLive(t, older);
+      codexSwap.adoptLive(t);
+      assert.strictEqual(codexStore.get(a.id).oauth.refreshToken, older.refresh_token, 'adopted');
+      assert.strictEqual(codexStore.get(a.id).dead, null);
+
+      codexStore.update(a.id, { dead: 'refresh_token_reused', oauth: codexAuth.toStored(codexTokens('acct-a'), 'LR') });
+      const dir = path.join(CODEX_TMP, 'older-home');
+      fs.rmSync(dir, { recursive: true, force: true });
+      const older2 = codexTokens('acct-a', { expSecs: 50 * 3600 });
+      writeLive({ home: dir, authPath: path.join(dir, 'auth.json') }, older2);
+      await codexSwap.importFrom({ configDir: dir });
+      assert.strictEqual(codexStore.get(a.id).oauth.refreshToken, older2.refresh_token, 'imported');
+
+      // A pair that still works stays protected from an older copy.
+      const newest = codexTokens('acct-a', { expSecs: 300 * 3600 });
+      codexStore.update(a.id, { oauth: codexAuth.toStored(newest, 'LR') });
+      await codexSwap.importFrom({ configDir: dir });
+      assert.strictEqual(codexStore.get(a.id).oauth.refreshToken, newest.refresh_token, 'kept');
+    });
+  });
+
+  await checkAsync('codex swap: con backups de fecha futura el rollback restaura igual, y sin marca de ausencia no borra', async () => {
+    await withCodex(['future'], async (t) => {
+      const a = addCodexAccount('acct-a');
+      const b = addCodexAccount('acct-b');
+      // A clock that ran ahead once: 20 backups that sort after anything taken today.
+      for (let i = 0; i < 20; i++) fs.mkdirSync(path.join(codexSwap.backupsDir(), `2099-01-01T00-00-00-000Z-${String(i).padStart(4, '0')}-cdx_ffffff`), { recursive: true });
+      writeLive(t, codexAuth.toTokens(a.oauth), { extra: 1 });
+      const before = fs.readFileSync(t.authPath);
+      await assert.rejects(codexSwap.swapTo(b.id, t), /restaurado/);
+      assert.ok(fs.existsSync(t.authPath) && fs.readFileSync(t.authPath).equals(before), 'restored, not deleted');
+      assert.strictEqual(fs.readdirSync(codexSwap.backupsDir()).length, 20);
+
+      const hollow = path.join(CODEX_TMP, 'hollow-backup');
+      fs.mkdirSync(hollow, { recursive: true });
+      assert.throws(() => codexSwap.restoreFrom(hollow, t), /ausencia/);
+      assert.ok(fs.readFileSync(t.authPath).equals(before), 'no auth.json and no marker is no proof of absence');
+    }, stubCodexNet(401));
+  });
+
+  await checkAsync('codex rollback: reintenta un EPERM pasajero y no deja el .restore.tmp con tokens si falla', async () => {
+    await withCodex(['perm'], async (t) => {
+      const a = addCodexAccount('acct-a');
+      writeLive(t, codexAuth.toTokens(a.oauth));
+      const backup = codexSwap.backupNow(a.id, t);
+      fs.writeFileSync(t.authPath, '{}');
+      const realRename = fs.renameSync;
+      const eperm = () => Object.assign(new Error('EPERM: locked'), { code: 'EPERM' });
+      let fails = 1;
+      fs.renameSync = (...x) => { if (fails-- > 0) throw eperm(); return realRename(...x); };
+      try {
+        codexSwap.restoreFrom(backup.dir, t);
+        assert.strictEqual(readLive(t).tokens.account_id, 'acct-a', 'a transient lock is retried');
+        fs.writeFileSync(t.authPath, '{}');
+        fs.renameSync = () => { throw eperm(); };
+        assert.throws(() => codexSwap.restoreFrom(backup.dir, t), /EPERM/);
+      } finally {
+        fs.renameSync = realRename;
+      }
+      assert.deepStrictEqual(fs.readdirSync(t.home).filter((n) => n.endsWith('.tmp')), [], 'no token copy left behind');
+    });
+  });
+
+  await checkAsync('/api/codex/*: X-Swapper obligatoria, 400/404 donde toca, y ninguna respuesta lleva un token', async () => {
+    const server = require('./server').createServer(7993);
+    const cp = require('node:child_process');
+    const spawnReal = cp.spawn;
+    const antes = process.env.SWAPPER_IN_CONTAINER;
+    let lanzo = false;
+    await withCodex(['http'], async (t) => {
+      try {
+        await new Promise((r) => server.listen(7993, '127.0.0.1', r));
+        const bodies = [];
+        const call = async (method, p, body, headers = { 'X-Swapper': '1' }) => {
+          const r = await fetch(`http://127.0.0.1:7993${p}`, {
+            method, headers: { 'Content-Type': 'application/json', ...headers },
+            body: body === undefined ? undefined : JSON.stringify(body),
+          });
+          const text = await r.text();
+          bodies.push(text);
+          return { status: r.status, body: JSON.parse(text) };
+        };
+        // The server's own fetch goes to the stubbed network; the test's goes to the socket.
+        const stub = global.fetch;
+        const real = realFetchForTests;
+        global.fetch = (url, opts) => (String(url).startsWith('http://127.0.0.1:7993') ? real(url, opts) : stub(url, opts));
+
+        codexTargetList = [t, codexTargets.hostTarget()];
+        const a = addCodexAccount('acct-http');
+        const b = addCodexAccount('acct-http-b');
+        assert.strictEqual((await call('GET', '/api/codex/accounts', undefined, {})).status, 403, 'no X-Swapper, no answer');
+        const list = await call('GET', `/api/codex/accounts?target=${encodeURIComponent(t.id)}`);
+        assert.strictEqual(list.status, 200);
+        assert.ok('activeId' in list.body && Array.isArray(list.body.accounts));
+        assert.strictEqual(list.body.accounts.length, 2);
+
+        assert.strictEqual((await call('POST', '/api/codex/swap', { id: a.id, target: 'wsl:no-existe' })).status, 400);
+        assert.strictEqual((await call('POST', '/api/codex/swap', { target: t.id })).status, 400, 'no id');
+        assert.strictEqual((await call('POST', '/api/codex/swap', { id: 'cdx_000000', target: t.id })).status, 404);
+        assert.strictEqual((await call('GET', '/api/codex/nope')).status, 404);
+        assert.strictEqual((await call('DELETE', '/api/codex/accounts/acc_123456')).status, 404, 'a Claude id is not a Codex route');
+
+        const swapped = await call('POST', '/api/codex/swap', { id: a.id, target: t.id });
+        assert.strictEqual(swapped.status, 200);
+        assert.strictEqual(swapped.body.target, t.id);
+        assert.strictEqual(swapped.body.account.isActive, true);
+        const targetsRes = await call('GET', '/api/codex/targets');
+        assert.strictEqual(targetsRes.body.targets[0].activeId, a.id);
+        assert.strictEqual(targetsRes.body.targets[0].storeMode, 'file');
+        const all = await call('GET', '/api/codex/usage/all');
+        assert.strictEqual(all.body[a.id].session.percent, 12, 'served from the reading the swap primed');
+        assert.strictEqual((await call('GET', `/api/codex/usage?id=${a.id}`)).body.ok, true);
+        assert.strictEqual((await call('GET', '/api/codex/usage?id=cdx_000000')).status, 404);
+        assert.strictEqual((await call('POST', '/api/codex/swap', { id: a.id, target: 'host' })).status, 409, 'live in another environment');
+
+        const renamed = await call('PATCH', `/api/codex/accounts/${b.id}`, { label: '  Equipo  ' });
+        assert.strictEqual(renamed.body.account.label, 'Equipo');
+        assert.strictEqual((await call('PATCH', `/api/codex/accounts/${b.id}`, { label: ' ' })).status, 400);
+
+        const health = await call('GET', '/api/codex/health');
+        assert.strictEqual(health.status, 200);
+        for (const k of ['installed', 'running', 'pids', 'overridingEnv', 'softEnv', 'storeMode', 'container', 'paths']) assert.ok(k in health.body, k);
+        assert.strictEqual(health.body.paths.home, process.env.CODEX_HOME);
+
+        writeLive({ home: codexSwap.stagingDir(), authPath: path.join(codexSwap.stagingDir(), 'auth.json') }, codexTokens('acct-staged'));
+        const imp = await call('POST', '/api/codex/accounts/import', { staging: true });
+        assert.strictEqual(imp.status, 200);
+        assert.strictEqual(imp.body.account.id, codexStore.idFor('acct-staged'));
+        assert.strictEqual((await call('POST', '/api/codex/accounts/import', { staging: true })).status, 404, 'consumed');
+        assert.deepStrictEqual(imp.body.warnings, []);
+        // Another CODEX_HOME keeps its copy of the rotating refresh token: the answer says so.
+        const otherHome = path.join(CODEX_TMP, 'http-other-home');
+        writeLive({ home: otherHome, authPath: path.join(otherHome, 'auth.json') }, codexTokens('acct-dir'));
+        const fromDir = await call('POST', '/api/codex/accounts/import', { configDir: otherHome });
+        assert.strictEqual(fromDir.status, 200);
+        assert.strictEqual(fromDir.body.warnings.length, 1);
+        assert.match(fromDir.body.warnings[0], /refresh token/);
+
+        process.env.SWAPPER_IN_CONTAINER = '1';
+        cp.spawn = (...x) => { lanzo = true; return spawnReal(...x); };
+        const term = await call('POST', '/api/codex/login/terminal', {});
+        assert.strictEqual(term.status, 409);
+        assert.strictEqual(lanzo, false, 'nothing opened inside a container');
+
+        assert.strictEqual((await call('DELETE', `/api/codex/accounts/${b.id}`)).status, 200);
+        assert.strictEqual(codexStore.get(b.id), null);
+
+        for (const text of bodies) {
+          assert.ok(!/eyJ[A-Za-z0-9_-]{10,}/.test(text) && !/rt\.a\./.test(text), `a response leaked a token: ${text.slice(0, 120)}`);
+        }
+      } finally {
+        cp.spawn = spawnReal;
+        if (antes === undefined) delete process.env.SWAPPER_IN_CONTAINER; else process.env.SWAPPER_IN_CONTAINER = antes;
+        await new Promise((r) => server.close(r));
+      }
+    });
+  });
+
+  fs.rmSync(CODEX_TMP, { recursive: true, force: true });
   console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} check(s) failed.\n`);
   process.exit(failures === 0 ? 0 : 1);
 })();

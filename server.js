@@ -14,6 +14,9 @@ const credentials = require('./lib/credentials');
 const targets = require('./lib/targets');
 const terminal = require('./lib/terminal');
 const auto = require('./lib/auto');
+// Codex lives in its own package, with its own store: nothing below this line ever sees it.
+const codexRoutes = require('./lib/codex/routes');
+const codexSwap = require('./lib/codex/swap');
 
 // The host the BROWSER uses, and the only one the Host-header allowlist accepts. Kept separate
 // from the bind address on purpose: a container has to listen on all of its own interfaces to be
@@ -172,6 +175,11 @@ const BUILD = (() => {
 async function handleApi(req, res, url, port) {
   const { pathname } = url;
   const method = req.method;
+
+  if (pathname.startsWith('/api/codex/')) {
+    if (await codexRoutes.handle(req, res, url, { send, fail, readBody })) return;
+    return fail(res, 404, 'Endpoint desconocido');
+  }
 
   if (pathname === '/api/health' && method === 'GET') {
     const procs = swap.detectClaudeProcesses();
@@ -461,6 +469,16 @@ const keepAliveTick = () => keepTokensAlive().catch((err) => {
   console.warn(`  keep-alive: ${oauth.scrub((err && err.message) || err)}`);
 });
 
+// Same idea for Codex, with its own rules (lib/codex/swap.js): adopt what Codex rotated in each
+// environment, renew only the idle accounts - the panel is their only holder.
+const codexKeepAlive = () => codexSwap.keepAliveTick().then((r) => {
+  for (const who of r.adopted) console.log(`  sesión Codex adoptada: ${who} (Codex había rotado su token)`);
+  for (const who of r.refreshed) console.log(`  token Codex renovado: ${who}`);
+  for (const f of r.failed) console.warn(`  no se pudo renovar Codex ${f.email || f.target}: ${oauth.scrub(f.error)}`);
+}).catch((err) => {
+  console.warn(`  keep-alive Codex: ${oauth.scrub((err && err.message) || err)}`);
+});
+
 function createServer(port) {
   return http.createServer(async (req, res) => {
     let url;
@@ -522,10 +540,16 @@ function listen(port) {
     if (process.env.CLAUDE_CONFIG_DIR) {
       console.log(`  AVISO: CLAUDE_CONFIG_DIR está definido, se opera sobre ${P.claudeJsonPath()}`);
     }
+    if (process.env.CODEX_ACCESS_TOKEN) {
+      console.log('  AVISO: CODEX_ACCESS_TOKEN está definido y GANA a auth.json.');
+      console.log('         Mientras siga así, los swaps de Codex no tendrán efecto.');
+    }
     console.log('  Ctrl+C para salir\n');
     if (!process.env.NO_OPEN) oauth.openBrowser(url);
     keepAliveTick();
     setInterval(keepAliveTick, KEEPALIVE_EVERY_MS).unref();
+    codexKeepAlive();
+    setInterval(codexKeepAlive, KEEPALIVE_EVERY_MS).unref();
 
     // Auto-rotation monitor. Cheap when idle (reads the active account's cached usage);
     // only swaps when it has genuinely crossed the threshold. Off unless the user enabled it.
