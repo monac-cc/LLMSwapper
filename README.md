@@ -4,7 +4,7 @@
 
 **Switch the active AI-subscription account with one click - and see how much quota each one has left before you do.**
 
-<sub><b>Today it swaps Claude Code accounts, and only those.</b> The name is a plan, not a claim.
+<sub><b>Today it swaps Claude Code and OpenAI Codex CLI accounts.</b> The name is a plan, not a claim.
 <a href="#other-providers">What is coming</a>.</sub>
 
 [![test](https://github.com/monac-cc/LLMSwapper/actions/workflows/test.yml/badge.svg)](https://github.com/monac-cc/LLMSwapper/actions/workflows/test.yml)
@@ -23,7 +23,7 @@
 
 ## Install
 
-Node 18+ and Claude Code. No `npm install`, no build step.
+Node 18+ and Claude Code, Codex CLI or both. No `npm install`, no build step.
 
 ```bash
 git clone https://github.com/monac-cc/LLMSwapper.git
@@ -91,10 +91,10 @@ never kills it on a time limit. It also starts it right away - unless something 
 
 ---
 
-> **Status: Claude Code only.** Every account you can add today is an Anthropic one. The problem is
-> not specific to Claude - any coding tool backed by a personal subscription holds one account at a
-> time - but nothing else is wired up yet. [Other providers](#other-providers) is a list of
-> criteria, not of dates.
+> **Status: Claude Code and Codex CLI.** A **Claude | Codex** switch at the top of the page picks
+> which one you are looking at; each keeps its own accounts, environments and tab. The problem is
+> not specific to either - any coding tool backed by a personal subscription holds one account at a
+> time - and [Other providers](#other-providers) is a list of criteria, not of dates.
 
 ## What it does
 
@@ -159,6 +159,56 @@ Nothing to configure - it runs `wsl.exe -l -q --running` and takes what comes ba
 - A dot means Claude Code is running there. Each environment tracks its own active account.
 - WSL is a Windows feature; elsewhere there is one tab.
 
+## Codex
+
+Press **Codex** in the switch at the top. The same page - rows, meters, tabs, **swap** - now works
+on OpenAI Codex CLI accounts (ChatGPT sign-in), kept in a store of their own: nothing on the Claude
+side ever sees an OpenAI token, or the reverse. The switch and each view's tab are remembered.
+
+**Adding an account.** Three ways in, none of which touches the session you are using:
+
+- **add account** - opens a terminal running `codex login` with `CODEX_HOME` pointed at a panel-owned
+  directory (`data/codex/login/`). Finish the login in the browser, then press **import** in the step
+  that appears under the header. The panel stores it and deletes that directory's `auth.json`.
+- **import** - stores the account Codex is signed in with in the selected environment right now.
+- **Shift + click import** - reads a login from another directory, one you signed in to with
+  `CODEX_HOME=/tmp/other codex login`. That directory and the panel then share one refresh token,
+  and the panel says so: use the account through the panel from then on, not from there.
+
+There is no Codex `setup-token`, so there is nothing to paste. API-key `auth.json` files are refused:
+only ChatGPT accounts have a quota to show. Adding the same account twice updates it in place, and
+the name you gave it stays.
+
+**Switching** is the same audited swap as Claude's: backup to `data/codex/backups/` (last 20),
+refresh if the token is about to expire, rewrite only `tokens`, `auth_mode` and `last_refresh` in
+`auth.json` (every other key survives), verify against the usage endpoint, and restore the file if OpenAI
+rejects the token (401/403) - or delete it again if there was none before. A Cloudflare bot
+challenge (an HTML 403) only warns: it says nothing about the token.
+
+**WSL.** A distro gets a Codex tab once it is running and has a `~/.codex` directory, i.e. once
+Codex is installed and has run there. Swapping writes that distro's `auth.json`, so an account you
+signed in to on Windows works inside WSL with no second login.
+
+**Meters** read `chatgpt.com/backend-api/wham/usage`, the endpoint Codex's own `/status` reads: the
+5-hour and weekly windows, **0 tokens** per reading. Refreshed with the Claude ones' rhythm - every 5
+minutes and on demand, a 4-minute cache, the last reading marked stale when chatgpt.com rate-limits.
+An account whose sign-in OpenAI has revoked shows "sign in again": **add account**, log in with it,
+**import**.
+
+Codex's own limits, and the panel's:
+
+- **Open sessions keep the old account.** A running Codex does not watch `auth.json`; the swap
+  reaches the next `codex` you start there. The panel warns when one is open (the desktop app counts).
+- **One environment per account at a time.** Codex refresh tokens rotate, and the old one dies on
+  use: two `auth.json` files holding the same one kill each other on the first refresh. Swapping an
+  account into a second environment is refused until the first one is switched to another account.
+- **Keyring storage is refused.** With `cli_auth_credentials_store = "keyring"` (or `auto`) in
+  `config.toml`, the session is not in `auth.json`, so a swap would do nothing. The panel refuses and
+  says how to go back to `"file"`.
+- **No automatic rotation and no `/swapper*` skills for Codex yet.** Those drive Claude only.
+- **`CODEX_ACCESS_TOKEN` outranks `auth.json`.** While it is set, a swap is a silent no-op; the panel
+  shows a banner. `CODEX_API_KEY` only reaches `codex exec` and is not treated as an override.
+
 ## Slash commands (Claude Code skills)
 
 Three skills drive the panel from inside any Claude Code session, so you can check quota or
@@ -217,12 +267,12 @@ the running panel. They work from **any** Claude Code session, not just one open
 
 ## Other providers
 
-Claude Code ships today. The rest are candidates, in rough order of fit.
+Claude Code and Codex CLI ship today. The rest are candidates, in rough order of fit.
 
 | Provider | Tool | Status |
 |---|---|---|
 | **Anthropic** | Claude Code | **Shipping** - host and WSL, token or import |
-| **OpenAI** | Codex CLI | Coming soon - credentials in `~/.codex/auth.json` |
+| **OpenAI** | Codex CLI | **Shipping** - host and WSL, ChatGPT sign-in, [see Codex](#codex) |
 | **GitHub** | Copilot | Considering - `~/.config/github-copilot/` |
 | **Google** | Gemini CLI | Considering - `~/.gemini/` |
 | **Cursor / Windsurf** | editor sign-in | Investigating - held by the editor, not a file this tool can rewrite |
@@ -236,8 +286,8 @@ you use fits, an issue naming it and where it stores credentials is the most use
 
 - **Loopback only** by default, plus a required header on every API call. DNS rebinding is rejected by validating the `Host` hostname.
 - **Reaching it from another device is opt-in and unauthenticated.** `SWAPPER_BIND=0.0.0.0` widens the socket and `SWAPPER_ALLOWED_HOSTS=192.168.1.10,my-pc` widens the `Host` allowlist - both, or it stays closed. Only the hosts you name are let in; every other one, rebinding included, is still refused. There is no login, so anyone who can route to that address can swap, rename and delete your accounts. A tunnel or a private mesh is the better answer; this is for a network you trust.
-- Tokens live in `data/` (real NTFS ACL on Windows) and **never leave the process**. Anything matching `sk-ant-*` is scrubbed from logs and responses; a test fails the build if a token literal appears in any source file.
-- **No OAuth flow in the panel.** You mint tokens in your own terminal and paste them.
+- Tokens live in `data/` (real NTFS ACL on Windows) and **never leave the process**. Anything matching `sk-ant-*`, an OpenAI JWT or an OpenAI refresh token is scrubbed from logs and responses; a test fails the build if a token literal appears in any source file.
+- **No OAuth flow in the panel.** You mint tokens in your own terminal and paste them, or sign in with the CLI's own login and import the result.
 - A pasted token is a **year-long** secret. The field is a password input, emptied when the form closes.
 - Every swap is preceded by a backup and rolls back on failure.
 
@@ -261,7 +311,7 @@ you use fits, an issue naming it and where it stores credentials is the most use
 ## Development
 
 ```bash
-node test.js        # 63 checks, ~3 s, no external network
+node test.js        # 95 checks, ~12 s, no external network
 ```
 
 Every `fetch` is stubbed, so a run never spends the usage endpoint's budget. Each module has its
