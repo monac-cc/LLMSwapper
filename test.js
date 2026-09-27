@@ -1698,6 +1698,33 @@ async function checkAsync(name, fn) {
     }, stubCodexNet(401));
   });
 
+  await checkAsync('codex: un token revocado (logout en Codex) marca la cuenta, en la lectura de uso y en el swap', async () => {
+    // Medido en vivo: el logout de Codex revoca los tokens y chatgpt.com responde 401 con
+    // x-openai-ide-error-code: token_revoked. La fila no puede seguir enseñando el 0% de antes.
+    const revoked = async (url) => {
+      if (String(url) !== codexUsage.USAGE_URL) throw new Error(`unexpected call to ${url}`);
+      return { ok: false, status: 401, headers: { get: (h) => (h.toLowerCase() === 'x-openai-ide-error-code' ? 'token_revoked' : null) }, text: async () => '{"error":{"code":"token_revoked"}}' };
+    };
+    await withCodex(['win'], async (win) => {
+      const a = addCodexAccount('acct-live');
+      const b = addCodexAccount('acct-revoked');
+      writeLive(win, codexAuth.toTokens(a.oauth));
+      const before = fs.readFileSync(win.authPath);
+
+      await assert.rejects(codexSwap.swapTo(b.id, win), /revocado[\s\S]*añadir cuenta[\s\S]*restaurado/);
+      assert.ok(fs.readFileSync(win.authPath).equals(before), 'rolled back');
+      assert.ok(codexStore.get(b.id).dead, 'the revoked account is marked, not left looking healthy');
+
+      const c = addCodexAccount('acct-read');
+      const r = await codexUsage.fetchFor(codexStore.get(c.id), { force: true });
+      assert.strictEqual(r.needsRelogin, true);
+      assert.match(r.error, /añadir cuenta/);
+      assert.ok(codexStore.get(c.id).dead, 'a usage read that meets token_revoked marks it too');
+      await assert.rejects(codexSwap.swapTo(c.id, win), (e) => e.status === 409, 'a marked account is refused before any write');
+      assert.ok(fs.readFileSync(win.authPath).equals(before));
+    }, revoked);
+  });
+
   await checkAsync('codex swap: con Codex abierto avisa, y el store se queda el par rotado de la cuenta saliente', async () => {
     await withCodex(['live'], async (t) => {
       const a = addCodexAccount('acct-a');

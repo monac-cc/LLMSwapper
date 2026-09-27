@@ -588,6 +588,15 @@ binds 127.0.0.1:1455 first; if it cannot, it opens `codex login --device-auth`, 
 API-key files, incomplete token sets and incoherent claims are refused. An older copy of a login
 does not replace a newer pair the store still trusts, unless that one is `dead`.
 
+### Logout revokes
+
+Codex's `account/logout` revokes the account's tokens at OpenAI; measured on a live install, every
+account "switched away from" with logout-then-login was answered `401` with
+`x-openai-ide-error-code: token_revoked` afterwards. Nothing the panel does can undo that, so it
+detects it: a usage read or a swap verify that meets `token_revoked` marks the account `dead`
+(row: "revoked, add it again"), drops its cached reading, and refuses to swap it in. Importing a
+live session warns that logging out to add the next account revokes this one.
+
 ### Keep-alive
 
 Every 6 h and once at start, next to the Claude one: `adoptLive` on every target (known accounts
