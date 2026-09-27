@@ -103,6 +103,33 @@ const I18N = {
     'toast.removed': '{name} eliminada del dashboard',
     'toast.swapped': 'Cuenta activa en {env}: {name}',
     'toast.swapFailed': 'No se pudo cambiar: {error}',
+
+    'provider.group': 'Proveedor',
+    'dir.prefix': 'CLAUDE_CONFIG_DIR',
+
+    // Vista Codex. t() prueba antes `codex.<clave>`, así que aquí solo está lo que cambia.
+    'codex.add': 'añadir cuenta',
+    'codex.add.title': 'Abre una terminal con codex login para añadir otra cuenta de Codex',
+    'codex.import.title': 'Guarda la cuenta con la que Codex tiene sesión ahora en este entorno · Mayús+clic para una carpeta CODEX_HOME',
+    'codex.dir.label': 'Importar desde otra carpeta CODEX_HOME',
+    'codex.dir.prefix': 'CODEX_HOME',
+    'codex.dir.help': 'Una carpeta en la que ejecutaste <code>CODEX_HOME=… codex login</code>. Tu sesión activa no se toca.',
+    'codex.tab.running': 'Codex está abierto en {name}: las sesiones abiertas siguen con la cuenta anterior y el swap llega a las nuevas',
+    'codex.empty.title': '0 cuentas de Codex registradas',
+    'codex.empty.step1': 'Pulsa <strong>añadir cuenta</strong>: se abre una terminal con <code>codex login</code> en una carpeta aparte.',
+    'codex.empty.step2': 'Termina el login en el navegador.',
+    'codex.empty.step3': 'Vuelve aquí y pulsa <strong>importar</strong> en el paso que aparece arriba.',
+    'codex.empty.footnote': 'Tu sesión actual no se toca. También puedes <strong>importar</strong> la sesión que Codex ya tenga abierta, o Mayús+clic para leerla de otra carpeta <code>CODEX_HOME</code>.',
+    'codex.note.expired': 'Sesión caducada o revocada. Vuelve a entrar con esta cuenta (añadir cuenta) e impórtala.',
+    'codex.banner.env': 'gana a <code>auth.json</code>: mientras siga definida, los cambios de cuenta <strong>no tendrán efecto</strong> en Codex.',
+    'codex.banner.keyring': 'Codex guarda la sesión de este entorno en el llavero del sistema, no en <code>auth.json</code>, así que los swaps se rechazan. Pon <code>cli_auth_credentials_store = "file"</code> en el <code>config.toml</code> de su <code>CODEX_HOME</code> (<code>~/.codex</code> por defecto) y vuelve a hacer <code>codex login</code>.',
+    'codex.banner.missing': 'No se encuentra <code>codex</code> en el PATH: <strong>añadir cuenta</strong> no puede abrir el login. Instálalo con <code>npm i -g @openai/codex</code>.',
+    'codex.banner.container': 'En contenedor: no puede ver si Codex está abierto, ofrecer targets de WSL ni abrir el login. El swap sobre el host solo funciona si montaste su <code>~/.codex</code>.',
+    'codex.login.label': 'Nueva cuenta de Codex',
+    'codex.login.text': 'Termina el login en el navegador y pulsa importar.',
+    'codex.login.submit': 'importar',
+    'codex.toast.loginOpened': 'Terminal abierta ({how}). Termina el login en el navegador y pulsa importar.',
+    'codex.toast.imported': 'Cuenta de Codex importada: {name}',
   },
 
   en: {
@@ -186,14 +213,48 @@ const I18N = {
     'toast.removed': '{name} removed from the dashboard',
     'toast.swapped': 'Active account in {env}: {name}',
     'toast.swapFailed': 'Could not switch: {error}',
+
+    'provider.group': 'Provider',
+    'dir.prefix': 'CLAUDE_CONFIG_DIR',
+
+    'codex.add': 'add account',
+    'codex.add.title': 'Opens a terminal running codex login to add another Codex account',
+    'codex.import.title': 'Store the account Codex is signed in with in this environment · Shift+click for a CODEX_HOME folder',
+    'codex.dir.label': 'Import from another CODEX_HOME directory',
+    'codex.dir.prefix': 'CODEX_HOME',
+    'codex.dir.help': 'A directory where you ran <code>CODEX_HOME=… codex login</code>. Your active session is left alone.',
+    'codex.tab.running': 'Codex is running in {name}: open sessions keep the old account, the swap reaches new ones',
+    'codex.empty.title': 'No Codex accounts yet',
+    'codex.empty.step1': 'Press <strong>add account</strong>: a terminal opens running <code>codex login</code> in a separate directory.',
+    'codex.empty.step2': 'Finish the login in the browser.',
+    'codex.empty.step3': 'Come back and press <strong>import</strong> in the step shown above.',
+    'codex.empty.footnote': 'Your current session is left alone. You can also <strong>import</strong> the session Codex already has open, or Shift+click to read it from another <code>CODEX_HOME</code> directory.',
+    'codex.note.expired': 'Session expired or revoked. Sign in with this account again (add account) and import it.',
+    'codex.banner.env': 'outranks <code>auth.json</code>: while it is set, switching accounts <strong>will have no effect</strong> in Codex.',
+    'codex.banner.keyring': 'Codex keeps the session of this environment in the system keyring, not in <code>auth.json</code>, so swaps are refused. Set <code>cli_auth_credentials_store = "file"</code> in the <code>config.toml</code> of its <code>CODEX_HOME</code> (<code>~/.codex</code> by default) and run <code>codex login</code> again.',
+    'codex.banner.missing': '<code>codex</code> is not on the PATH: <strong>add account</strong> cannot open the login. Install it with <code>npm i -g @openai/codex</code>.',
+    'codex.banner.container': 'In a container: it cannot see whether Codex is running, offer WSL targets or open the login. Swapping the host only works if you mounted its <code>~/.codex</code>.',
+    'codex.login.label': 'New Codex account',
+    'codex.login.text': 'Finish the login in the browser, then press import.',
+    'codex.login.submit': 'import',
+    'codex.toast.loginOpened': 'Terminal opened ({how}). Finish the login in the browser, then press import.',
+    'codex.toast.imported': 'Codex account imported: {name}',
   },
 };
 
 let lang = document.documentElement.lang === 'en' ? 'en' : 'es';
+// 'claude' | 'codex'. Lo fija el script del <head> desde localStorage['swapper.provider'].
+let provider = document.documentElement.dataset.provider === 'codex' ? 'codex' : 'claude';
+// Prefijo de la API del proveedor visible: cuentas, entornos, uso, swap, import y health.
+const API = () => (provider === 'codex' ? '/api/codex' : '/api');
 
-/** Una cadena traducida, con {marcadores} sustituidos. Cae al castellano si falta la clave. */
+/**
+ * Una cadena traducida, con {marcadores} sustituidos. Cae al castellano si falta la clave.
+ * En la vista Codex prueba antes `codex.<clave>`: solo las cadenas que cambian tienen entrada.
+ */
 function t(key, vars) {
-  let s = (I18N[lang] && I18N[lang][key]) ?? I18N.es[key] ?? key;
+  const pick = (k) => (I18N[lang] && I18N[lang][k]) ?? I18N.es[k];
+  let s = (provider === 'codex' ? pick(`codex.${key}`) : undefined) ?? pick(key) ?? key;
   if (vars) for (const [k, v] of Object.entries(vars)) s = s.split('{' + k + '}').join(v);
   return s;
 }
@@ -214,16 +275,19 @@ let swapping = false;
 let openConfirm = null;
 // Environments shown at once, from /api/targets: [{id,label,kind,activeId,running}]. The
 // account list is shared; each section marks its own active account and swaps into it.
-let targetList = [{ id: 'host', label: 'host', kind: 'host', activeId: null, running: false }];
+const HOST_ONLY = () => [{ id: 'host', label: 'host', kind: 'host', activeId: null, running: false }];
+let targetList = HOST_ONLY();
 // Which environment's tab is open. Survives a reload because losing it on every refresh would
 // mean re-picking your WSL distro all day; falls back to the host when the remembered one is
-// gone (a distro stopped, or WSL removed).
-let selectedTarget = (() => {
-  try { return localStorage.getItem('swapper.target') || 'host'; } catch { return 'host'; }
-})();
+// gone (a distro stopped, or WSL removed). One memory per provider: Claude keeps its old key.
+const targetKey = () => (provider === 'codex' ? 'swapper.codex.target' : 'swapper.target');
+const loadTarget = () => {
+  try { return localStorage.getItem(targetKey()) || 'host'; } catch { return 'host'; }
+};
+let selectedTarget = loadTarget();
 function selectTarget(id) {
   selectedTarget = id;
-  try { localStorage.setItem('swapper.target', id); } catch { /* private window: not worth failing over */ }
+  try { localStorage.setItem(targetKey(), id); } catch { /* private window: not worth failing over */ }
   render();
 }
 
@@ -247,6 +311,47 @@ function setLang(next) {
   for (const b of $$('#switch-lang button')) b.setAttribute('aria-pressed', String(b.dataset.lang === next));
   applyI18n();
   render(); // las filas llevan textos construidos en JS, no solo data-i18n
+}
+
+/**
+ * Claude <-> Codex. Everything below the header is the provider's own: accounts, environments,
+ * usage and banners are dropped and fetched again from its API rather than shown stale for a
+ * poll. A request still in flight for the other provider is dropped on arrival (see refresh()).
+ */
+function setProvider(next) {
+  if (next === provider) return;
+  provider = next;
+  try { localStorage.setItem('swapper.provider', next); } catch { /* idem */ }
+  reflectProvider();
+
+  accounts = [];
+  usageById = {};
+  lastFetch = 0;
+  targetList = HOST_ONLY();
+  selectedTarget = loadTarget();
+  clearTimeout(queuedRetry);
+  // renderSkeletons() below wipes the rows without render()'s abort, so drop any open question here.
+  if (openConfirm) { openConfirm.abort(); openConfirm = null; }
+  // Each inline form belongs to one provider; the token one also drops what was pasted into it.
+  closeTokenField({ focusBack: false });
+  dirForm.hidden = true;
+  dirInput.value = '';
+  loginForm.hidden = true;
+  for (const id of ['banner-container', 'banner-stale', 'banner-env', 'banner-keyring', 'banner-codex-missing']) {
+    $(`#${id}`).hidden = true;
+  }
+  $('#tabs').hidden = true;
+  $('#empty').hidden = true;
+  envsEl.hidden = false;
+
+  applyI18n();
+  renderSkeletons();
+  refresh(false);
+}
+
+function reflectProvider() {
+  document.documentElement.dataset.provider = provider;
+  for (const b of $$('#switch-provider button')) b.setAttribute('aria-pressed', String(b.dataset.provider === provider));
 }
 
 function setTheme(next) {
@@ -358,7 +463,9 @@ function noteFor(usage) {
   if (!usage) return null;
   if (usage.ok) {
     if (usage.stale) {
-      const mins = Math.round((Date.now() - usage.staleSince) / 60000);
+      // staleSince (ms) is what both backends send; fetchedAt is the fallback for a reading without it.
+      const since = usage.staleSince ?? usage.fetchedAt;
+      const mins = Math.round((Date.now() - (typeof since === 'number' ? since : Date.parse(since))) / 60000);
       const age = mins >= 1 ? t('note.ageMin', { m: mins }) : t('note.ageUnder');
       // Queued behind the rate floor: say so, or "old data" reads as a broken refresh.
       if (usage.queued && Number.isFinite(usage.retryInS)) {
@@ -432,8 +539,8 @@ function sortedFor(target) {
     if (aa !== bb) return aa ? -1 : 1;
     const ua = usageById[a.id];
     const ub = usageById[b.id];
-    const pa = ua && ua.ok ? ua.session.percent : 999;
-    const pb = ub && ub.ok ? ub.session.percent : 999;
+    const pa = ua && ua.ok && ua.session ? ua.session.percent : 999;
+    const pb = ub && ub.ok && ub.session ? ub.session.percent : 999;
     return pa - pb;
   });
 }
@@ -458,14 +565,16 @@ async function rescanTargets(button) {
   button.classList.add('is-loading');
   bar.classList.add('is-scanning');
 
+  const p = provider;
   const antes = new Set(targetList.map((x) => x.id));
   // Un suelo de tiempo: la deteccion puede volver en 80 ms y un parpadeo de 80 ms no se ve, asi
   // que el boton parece no haber hecho nada. Con medio segundo el barrido se lee.
   const suelo = new Promise((r) => setTimeout(r, 550));
 
   try {
-    const res = await api('/api/targets?force=1');
+    const res = await api(`${API()}/targets?force=1`);
     await suelo;
+    if (provider !== p) return; // the other provider's tabs are on screen now
     if (res && Array.isArray(res.targets) && res.targets.length) targetList = res.targets;
 
     const nuevos = targetList.filter((x) => !antes.has(x.id));
@@ -482,7 +591,7 @@ async function rescanTargets(button) {
       toast(t('rescan.none'));
     }
   } catch (err) {
-    toast(err.message, 'err');
+    if (provider === p) toast(err.message, 'err');
   } finally {
     bar.classList.remove('is-scanning');
     button.disabled = false;
@@ -564,10 +673,12 @@ function render() {
   if (openConfirm) { openConfirm.abort(); openConfirm = null; }
   envsEl.innerHTML = '';
 
+  // A remembered distro can disappear between reloads; falling back keeps the panel usable
+  // instead of rendering nothing at all.
+  const target = targetList.find((t) => t.id === selectedTarget) || targetList[0];
+  // Per environment: a WSL distro can use the keyring while the host does not, and the other way round.
+  $('#banner-keyring').hidden = provider !== 'codex' || !target.storeMode || target.storeMode === 'file';
   if (has) {
-    // A remembered distro can disappear between reloads; falling back keeps the panel usable
-    // instead of rendering nothing at all.
-    const target = targetList.find((t) => t.id === selectedTarget) || targetList[0];
     selectedTarget = target.id;
     buildTabs();
     envsEl.append(buildSection(target));
@@ -627,7 +738,7 @@ function armRemoval(node, account) {
   $('.btn-yes', confirmEl).addEventListener('click', async () => {
     close();
     try {
-      await api(`/api/accounts/${account.id}`, { method: 'DELETE' });
+      await api(`${API()}/accounts/${account.id}`, { method: 'DELETE' });
       toast(t('toast.removed', { name: account.label }), 'ok');
       await refresh(false);
     } catch (err) {
@@ -673,7 +784,7 @@ function armRename(node, account) {
     if (!label || label === account.label) { close(); return; }
     close();
     try {
-      await api(`/api/accounts/${account.id}`, { method: 'PATCH', body: { label } });
+      await api(`${API()}/accounts/${account.id}`, { method: 'PATCH', body: { label } });
       await refresh(false);
     } catch (err) {
       toast(err.message, 'err');
@@ -706,7 +817,7 @@ async function doSwap(id, targetId, button) {
   button.classList.add('is-loading');
 
   try {
-    const result = await api('/api/swap', { method: 'POST', body: { id, target: targetId } });
+    const result = await api(`${API()}/swap`, { method: 'POST', body: { id, target: targetId } });
     toast(t('toast.swapped', { env: result.targetLabel || 'host', name: result.account.label }), 'ok');
     for (const w of result.warnings || []) toast(w);
     // The swap already fetched this account's usage to verify the token; the server
@@ -774,10 +885,11 @@ async function importCurrent(configDir, targetId = 'host') {
   const buttons = [...$$('.btn-import-env'), $('#btn-import-empty')].filter(Boolean);
   buttons.forEach((b) => { b.disabled = true; b.classList.add('is-loading'); });
   try {
-    const result = await api('/api/accounts/import', {
+    const result = await api(`${API()}/accounts/import`, {
       method: 'POST', body: { target: targetId, ...(configDir ? { configDir } : {}) },
     });
     toast(t('toast.imported', { name: result.account.email || result.account.label }), 'ok');
+    for (const w of result.warnings || []) toast(w);
     await refresh(false);
   } catch (err) {
     toast(err.message, 'err');
@@ -805,22 +917,27 @@ function scheduleQueuedRetry() {
 }
 
 async function refresh(force = false) {
+  // Captured before any await: if the provider is switched while this is in flight, what comes
+  // back belongs to a view that is no longer on screen and must not be rendered into the new one.
+  const p = provider;
+  const base = API();
   const btn = $('#btn-refresh');
   btn.disabled = true;
   btn.classList.add('is-loading');
   try {
     // Environments first: this drives one section each, with their per-environment active
     // account and running state. Falls back to host-only if the endpoint is unreachable.
-    const res = await api('/api/targets').catch(() => null);
-    targetList = (res && Array.isArray(res.targets) && res.targets.length)
-      ? res.targets
-      : [{ id: 'host', label: 'host', kind: 'host', activeId: null, running: false }];
+    const res = await api(`${base}/targets`).catch(() => null);
 
     // The accounts are shared across environments; fetch them once. Each section marks its
     // own active from targetList, so the target of this call does not matter.
-    const data = await api('/api/accounts?target=host');
+    const data = await api(`${base}/accounts?target=host`);
+    const usage = data.accounts.length ? await api(`${base}/usage/all${force ? '?force=1' : ''}`) : {};
+    if (provider !== p) return;
+
+    targetList = (res && Array.isArray(res.targets) && res.targets.length) ? res.targets : HOST_ONLY();
     accounts = data.accounts;
-    usageById = accounts.length ? await api(`/api/usage/all${force ? '?force=1' : ''}`) : {};
+    usageById = usage;
     lastFetch = Date.now();
     $('#banner-offline').hidden = true;
     scheduleQueuedRetry();
@@ -828,12 +945,16 @@ async function refresh(force = false) {
     render();
     reportEnvironment();
   } catch (err) {
+    if (provider !== p) return;
     $('#banner-offline').hidden = false;
     envsEl.setAttribute('aria-busy', 'false');
     console.error(err);
   } finally {
-    btn.disabled = false;
-    btn.classList.remove('is-loading');
+    // After a switch the new provider's refresh owns the button; leave it to that one.
+    if (provider === p) {
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
   }
 }
 
@@ -847,8 +968,10 @@ async function refresh(force = false) {
  * open, which is why this is not asked once at boot.
  */
 async function reportEnvironment() {
+  const p = provider;
   let health;
-  try { health = await api('/api/health'); } catch { return; }
+  try { health = await api(`${API()}/health`); } catch { return; }
+  if (provider !== p) return;
 
   if (health.container) {
     $('#banner-container').hidden = false;
@@ -861,6 +984,10 @@ async function reportEnvironment() {
     $('#env-vars').textContent = vars.join(' y ');
     $('#banner-env').hidden = false;
   }
+
+  // Codex only: without the CLI there is no login - except in a container, where there is none
+  // anyway and the container banner says so. Keyring storage is per environment: see render().
+  if (p === 'codex') $('#banner-codex-missing').hidden = health.installed !== false || !!health.container;
 }
 
 /* ---------------- boot ---------------- */
@@ -873,6 +1000,8 @@ for (const b of $$('#switch-theme button')) b.addEventListener('click', () => se
 // refleja en los botones y se traduce lo estatico.
 setTheme(document.documentElement.dataset.theme || 'dark');
 for (const b of $$('#switch-lang button')) b.setAttribute('aria-pressed', String(b.dataset.lang === lang));
+for (const b of $$('#switch-provider button')) b.addEventListener('click', () => setProvider(b.dataset.provider));
+reflectProvider();
 applyI18n();
 
 // Plain click imports the live session. Shift-click imports from an isolated login
@@ -885,6 +1014,7 @@ function openDirField() {
   // Symmetric with openTokenField. Without this the two inline forms stacked, and the pasted
   // token stayed on screen underneath a form that has nothing to do with it.
   closeTokenField({ focusBack: false });
+  loginForm.hidden = true;
   dirForm.hidden = false;
   dirInput.focus();
   dirInput.select();
@@ -955,6 +1085,57 @@ if (emptyToken) emptyToken.addEventListener('click', openTokenField);
 const emptyImport = $('#btn-import-empty');
 if (emptyImport) emptyImport.addEventListener('click', (e) => (e.shiftKey ? openDirField() : importCurrent(null, 'host')));
 
+/* ---------------- alta en Codex ----------------
+ *
+ * Codex no tiene setup-token: una cuenta nueva sale de un `codex login` de verdad, en una terminal
+ * que abre el servidor con CODEX_HOME apuntando a su carpeta de staging, y luego se importa lo que
+ * dejó allí. La sesión activa no se toca. Las dos llamadas solo existen en Codex, así que su ruta
+ * va fija en vez de pasar por API().
+ */
+const loginForm = $('#login-form');
+const addCodexButtons = [$('#btn-add-codex'), $('#btn-add-codex-empty')].filter(Boolean);
+
+async function openCodexLogin() {
+  addCodexButtons.forEach((b) => { b.disabled = true; b.classList.add('is-loading'); });
+  try {
+    const r = await api('/api/codex/login/terminal', { method: 'POST', body: {} });
+    toast(t('codex.toast.loginOpened', { how: r.how }), 'ok');
+    if (provider !== 'codex') return; // cambió de vista mientras se abría: el paso ya no pinta nada
+    dirForm.hidden = true;
+    loginForm.hidden = false;
+    $('#login-submit').focus();
+  } catch (err) {
+    toast(err.message, 'err');
+  } finally {
+    addCodexButtons.forEach((b) => { b.disabled = false; b.classList.remove('is-loading'); });
+  }
+}
+function closeLoginField() {
+  loginForm.hidden = true;
+  const back = $('#btn-add-codex');
+  if (back) back.focus();
+}
+
+loginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const submit = $('#login-submit');
+  submit.disabled = true;
+  try {
+    const result = await api('/api/codex/accounts/import', { method: 'POST', body: { staging: true } });
+    toast(t('codex.toast.imported', { name: result.account.email || result.account.label }), 'ok');
+    loginForm.hidden = true;
+    await refresh(false);
+  } catch (err) {
+    // Se queda abierto: lo normal es que el login aún no hubiera terminado, y se reintenta aquí.
+    toast(err.message, 'err');
+  } finally {
+    submit.disabled = false;
+  }
+});
+$('#login-cancel').addEventListener('click', closeLoginField);
+loginForm.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLoginField(); });
+addCodexButtons.forEach((b) => b.addEventListener('click', openCodexLogin));
+
 document.addEventListener('keydown', (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   // Not while a "¿quitar?" is on screen: r would re-render the panel out from under the
@@ -963,7 +1144,8 @@ document.addEventListener('keydown', (e) => {
   if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
   if (e.key === 'r') refresh(true);
   if (e.key === 'i') importCurrent(null, 'host');
-  if (e.key === 't') openTokenField();
+  // Claude only: Codex has no token to paste, and opening a terminal on a stray key is too much.
+  if (e.key === 't' && provider === 'claude') openTokenField();
 });
 
 // Countdowns tick locally; no API call involved.

@@ -16,6 +16,8 @@
     var l = localStorage.getItem('swapper.lang');
     if (!l) l = (navigator.language || 'es').toLowerCase().startsWith('es') ? 'es' : 'en';
     document.documentElement.lang = l;
+    // El proveedor también, o con Codex guardado se vería un instante el botón de Claude.
+    document.documentElement.dataset.provider = localStorage.getItem('swapper.provider') === 'codex' ? 'codex' : 'claude';
   } catch (e) { document.documentElement.dataset.theme = 'dark'; }
 </script>
 <!-- Favicon = el mismo logo de la web: las dobles flechas #i-swap, verde fósforo sobre
@@ -76,9 +78,20 @@
 
   <div class="toolbar">
     <span class="sync" id="sync" aria-live="polite"></span>
-    <button class="btn btn-primary" id="btn-add-token" data-i18n-title="addToken.title">
+    <!-- Claude o Codex: dos paneles con el mismo código, cada uno con sus cuentas, sus entornos y
+         su pestaña recordada. Mismo patrón que idioma y tema (aria-pressed), pero delante: es lo
+         primero que decide qué se ve debajo. -->
+    <div class="switch switch-provider" id="switch-provider" role="group" data-i18n-aria="provider.group">
+      <button type="button" data-provider="claude" aria-pressed="false">Claude</button>
+      <button type="button" data-provider="codex" aria-pressed="false">Codex</button>
+    </div>
+    <button class="btn btn-primary only-claude" id="btn-add-token" data-i18n-title="addToken.title">
       <svg class="ico" viewBox="0 0 18 18" aria-hidden="true"><use href="#i-key"/></svg>
       <span data-i18n="addToken">añadir token</span>
+    </button>
+    <button class="btn btn-primary only-codex" id="btn-add-codex" data-i18n-title="codex.add.title">
+      <svg class="ico" viewBox="0 0 18 18" aria-hidden="true"><use href="#i-key"/></svg>
+      <span data-i18n="codex.add">añadir cuenta</span>
     </button>
     <button class="btn" id="btn-refresh" data-i18n-title="refresh.title">
       <svg class="ico" viewBox="0 0 18 18" aria-hidden="true"><use href="#i-refresh"/></svg>
@@ -128,12 +141,24 @@
   <p><strong id="env-vars"></strong> <span data-i18n-html="banner.env"></span></p>
 </div>
 
+<!-- Solo Codex: sesión en el llavero del sistema (los swaps se rechazan) y CLI ausente (el login
+     no se puede abrir). Los rellena /api/codex/health; al cambiar de proveedor se ocultan. -->
+<div class="notice notice-error" id="banner-keyring" hidden>
+  <svg class="ico" viewBox="0 0 18 18" aria-hidden="true"><use href="#i-alert"/></svg>
+  <p data-i18n-html="codex.banner.keyring"></p>
+</div>
+
+<div class="notice notice-warn" id="banner-codex-missing" hidden>
+  <svg class="ico" viewBox="0 0 18 18" aria-hidden="true"><use href="#i-alert"/></svg>
+  <p data-i18n-html="codex.banner.missing"></p>
+</div>
+
 <!-- Isolated-login import. An inline field, not a prompt: it stays on the page, it can
      be styled, and Escape or cancel returns you exactly where you were. -->
 <form class="field-row" id="dir-form" hidden>
   <label for="dir-input" data-i18n="dir.label">Importar desde otra carpeta de configuración</label>
   <div class="field-line">
-    <span class="field-prefix" aria-hidden="true">CLAUDE_CONFIG_DIR</span>
+    <span class="field-prefix" aria-hidden="true" data-i18n="dir.prefix">CLAUDE_CONFIG_DIR</span>
     <input type="text" id="dir-input" name="dir" spellcheck="false" autocomplete="off"
            placeholder="/tmp/cuenta2" aria-describedby="dir-help">
     <button class="btn btn-primary" type="submit" data-i18n="dir.submit">importar</button>
@@ -146,7 +171,7 @@
      se queda en la página, se puede estilar, y Escape devuelve el foco donde estaba. El campo
      del token es type=password: no se teclea, se pega, y así no queda a la vista de nadie que
      mire la pantalla ni lo guarda el autocompletado. -->
-<form class="field-row" id="token-form" hidden>
+<form class="field-row only-claude" id="token-form" hidden>
   <label for="token-input" data-i18n="token.label">Añadir una cuenta con un token de larga duración</label>
   <div class="field-line">
     <span class="field-prefix" aria-hidden="true">token</span>
@@ -166,6 +191,17 @@
   </p>
 </form>
 
+<!-- Segundo paso del alta en Codex: la terminal de "añadir cuenta" ya está abierta con
+     CODEX_HOME apuntando a la carpeta de staging del panel; aquí solo se importa lo que dejó. -->
+<form class="field-row only-codex" id="login-form" aria-labelledby="login-label" hidden>
+  <p class="field-label" id="login-label" data-i18n="codex.login.label">Nueva cuenta de Codex</p>
+  <div class="field-line">
+    <span class="field-text" data-i18n="codex.login.text">Termina el login en el navegador y pulsa importar.</span>
+    <button class="btn btn-primary" type="submit" id="login-submit" data-i18n="codex.login.submit">importar</button>
+    <button class="btn" type="button" id="login-cancel" data-i18n="cancel">cancelar</button>
+  </div>
+</form>
+
 <main>
   <!-- Un entorno a la vez, elegido con pestañas: el host (Windows, macOS o Linux) y cada distro
        de WSL. Las cuentas son LAS MISMAS en todas; lo que cambia por entorno es cuál está activa
@@ -183,9 +219,13 @@
     </ol>
     <p class="footnote" data-i18n-html="empty.footnote"></p>
     <div class="empty-actions">
-      <button class="btn btn-primary" id="btn-add-token-empty">
+      <button class="btn btn-primary only-claude" id="btn-add-token-empty">
         <svg class="ico" viewBox="0 0 18 18" aria-hidden="true"><use href="#i-key"/></svg>
         <span data-i18n="addToken">añadir token</span>
+      </button>
+      <button class="btn btn-primary only-codex" id="btn-add-codex-empty">
+        <svg class="ico" viewBox="0 0 18 18" aria-hidden="true"><use href="#i-key"/></svg>
+        <span data-i18n="codex.add">añadir cuenta</span>
       </button>
       <button class="btn" id="btn-import-empty">
         <svg class="ico" viewBox="0 0 18 18" aria-hidden="true"><use href="#i-import"/></svg>

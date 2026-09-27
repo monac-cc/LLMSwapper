@@ -150,6 +150,11 @@
    leave banners and the empty state permanently on screen. Settle it once, globally. */
 [hidden] { display: none !important; }
 
+/* Controles de un solo proveedor. El atributo lo pone ya el script del <head>, así que no hay un
+   cuadro con el botón del otro. */
+:root[data-provider="codex"] .only-claude,
+:root:not([data-provider="codex"]) .only-codex { display: none; }
+
 html { -webkit-text-size-adjust: 100%; }
 
 body {
@@ -440,6 +445,15 @@ main { max-width: 1180px; margin: 0 auto; }
 .switch button[aria-pressed="true"] { color: var(--bg); background: var(--phos); }
 .switch button:focus-visible { outline: 2px solid var(--phos); outline-offset: -2px; }
 
+/* El proveedor decide todo lo de debajo, así que el pulsado no se fía solo del relleno: también
+   va subrayado, y se lee igual en escala de grises o sin distinguir el verde. */
+.switch-provider button { padding-inline: 0.7rem; }
+.switch-provider button[aria-pressed="true"] {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
 /* El rescan va al final de la fila, separado de las pestañas y sin su hover rojo, que es del
    botón de quitar. Discreto: se usa una vez cada muchos días. */
 .tab-rescan {
@@ -677,7 +691,8 @@ main { max-width: 1180px; margin: 0 auto; }
   border-radius: var(--r-md);
   background: var(--surface-1);
 }
-.field-row > label {
+.field-row > label,
+.field-label {
   display: block;
   font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
   color: var(--text-3);
@@ -685,6 +700,9 @@ main { max-width: 1180px; margin: 0 auto; }
 }
 .field-line { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
 .field-prefix { font-size: 11px; color: var(--text-3); white-space: nowrap; }
+/* El paso del login de Codex no tiene campo: una frase y sus dos botones. */
+.field-label { margin-top: 0; }
+.field-text { flex: 1; min-width: 12rem; font-size: 12.5px; color: var(--text-2); }
 
 .field-line input {
   flex: 1; min-width: 12rem;
@@ -830,7 +848,8 @@ main { max-width: 1180px; margin: 0 auto; }
 
 @media (max-width: 560px) {
   .masthead { align-items: flex-start; }
-  .toolbar { width: 100%; }
+  /* Con el selector de proveedor la fila ya no cabe a 360px: que baje, no que se salga. */
+  .toolbar { width: 100%; flex-wrap: wrap; }
   .toolbar .btn { flex: 1; justify-content: center; }
   .sync { width: 100%; margin: 0 0 0.2rem; }
 }
