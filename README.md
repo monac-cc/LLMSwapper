@@ -170,6 +170,8 @@ side ever sees an OpenAI token, or the reverse. The switch and each view's tab a
 - **add account** - opens a terminal running `codex login` with `CODEX_HOME` pointed at a panel-owned
   directory (`data/codex/login/`). Finish the login in the browser, then press **import** in the step
   that appears under the header. The panel stores it and deletes that directory's `auth.json`.
+  If Windows has reserved the port the browser login answers on (1455 - `os error 10013`), the
+  terminal runs `codex login --device-auth` instead: open the link it prints and type the code.
 - **import** - stores the account Codex is signed in with in the selected environment right now.
 - **Shift + click import** - reads a login from another directory, one you signed in to with
   `CODEX_HOME=/tmp/other codex login`. That directory and the panel then share one refresh token,

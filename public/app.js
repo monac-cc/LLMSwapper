@@ -129,6 +129,7 @@ const I18N = {
     'codex.login.text': 'Termina el login en el navegador y pulsa importar.',
     'codex.login.submit': 'importar',
     'codex.toast.loginOpened': 'Terminal abierta ({how}). Termina el login en el navegador y pulsa importar.',
+    'codex.toast.loginDevice': 'Terminal abierta ({how}). Windows tiene reservado el puerto del login por navegador, así que usa el código: abre el enlace que muestra, escribe el código, y luego pulsa importar.',
     'codex.toast.imported': 'Cuenta de Codex importada: {name}',
   },
 
@@ -238,6 +239,7 @@ const I18N = {
     'codex.login.text': 'Finish the login in the browser, then press import.',
     'codex.login.submit': 'import',
     'codex.toast.loginOpened': 'Terminal opened ({how}). Finish the login in the browser, then press import.',
+    'codex.toast.loginDevice': 'Terminal opened ({how}). Windows reserves the browser login\'s port, so use the code: open the link it shows, type the code, then press import.',
     'codex.toast.imported': 'Codex account imported: {name}',
   },
 };
@@ -1099,7 +1101,7 @@ async function openCodexLogin() {
   addCodexButtons.forEach((b) => { b.disabled = true; b.classList.add('is-loading'); });
   try {
     const r = await api('/api/codex/login/terminal', { method: 'POST', body: {} });
-    toast(t('codex.toast.loginOpened', { how: r.how }), 'ok');
+    toast(t(r.deviceAuth ? 'codex.toast.loginDevice' : 'codex.toast.loginOpened', { how: r.how }), 'ok');
     if (provider !== 'codex') return; // cambió de vista mientras se abría: el paso ya no pinta nada
     dirForm.hidden = true;
     loginForm.hidden = false;

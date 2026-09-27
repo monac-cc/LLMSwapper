@@ -712,6 +712,21 @@ async function checkAsync(name, fn) {
     }
   });
 
+  await checkAsync('codex: con el puerto del login ocupado o reservado, se detecta y el alta pasa al código de dispositivo', async () => {
+    // Windows puede reservar el 1455 (rango dinámico que empieza en 1024 + Hyper-V/WSL): codex login
+    // falla entonces con os error 10013. El panel lo comprueba antes de abrir la terminal.
+    const terminal = require('./lib/terminal');
+    const holder = require('node:net').createServer();
+    await new Promise((r) => holder.listen({ host: '127.0.0.1', port: 0 }, r));
+    const { port } = holder.address();
+    try {
+      assert.strictEqual(await terminal.loginPortFree(port), false, 'un puerto ocupado no está libre');
+    } finally {
+      await new Promise((r) => holder.close(r));
+    }
+    assert.strictEqual(await terminal.loginPortFree(port), true, 'liberado, vuelve a estar libre');
+  });
+
   await checkAsync('la cabecera X-Swapper es obligatoria en toda la API, GET incluido', async () => {
     // Un <img src="http://127.0.0.1:7373/api/health"> desde cualquier web pasaba las tres
     // guardas: sin Origin, método GET, y Host correcto. Cada llamada lanza un tasklist.

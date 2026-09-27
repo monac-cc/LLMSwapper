@@ -580,6 +580,11 @@ tracks that directory afterwards; the route returns a warning saying so.
   single-quoted into the shell line. `importFrom({staging:true})` then stores it and deletes the
   staging `auth.json` - the store is its only holder.
 
+The browser login answers on `localhost:1455`. Windows can hold that port inside an excluded range
+(Hyper-V, WSL and Docker reserve blocks of the dynamic range, and a dynamic range that starts at 1024
+puts those blocks on low ports), and `codex login` then dies with `os error 10013`. The login route
+binds 127.0.0.1:1455 first; if it cannot, it opens `codex login --device-auth`, which needs no port.
+
 API-key files, incomplete token sets and incoherent claims are refused. An older copy of a login
 does not replace a newer pair the store still trusts, unless that one is `dead`.
 
