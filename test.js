@@ -578,6 +578,29 @@ check('las tres skills llevan el mismo swapper.mjs', () => {
   assert.strictEqual(a, c, 'swapper-auto/swapper.mjs difiere de swapper/swapper.mjs');
 });
 
+check('un login de Claude tiene un final fijo: la fila lo avisa y lo marca cuando llega', () => {
+  // Medido: refresh_expires_in cuenta atrás hasta el mismo instante en cada renovación.
+  const store = require('./lib/store');
+  const now = Date.now();
+  const mk = (refreshTokenExpiresAt) => store.add({
+    email: `s${refreshTokenExpiresAt}@x.y`, profile: { accountUuid: `uuid-s-${refreshTokenExpiresAt}` },
+    oauth: { accessToken: 'A', refreshToken: 'R', expiresAt: now + 3600e3, refreshTokenExpiresAt, scopes: ['user:profile'] },
+  });
+  const over = mk(now - 1000);
+  const soon = mk(now + 86400e3);
+  try {
+    const view = store.publicView('host').accounts;
+    const vo = view.find((a) => a.id === over.id), vs = view.find((a) => a.id === soon.id);
+    assert.strictEqual(vo.tokenExpired, true, 'past its end, the login is over even with a live access token');
+    assert.strictEqual(vs.tokenExpired, false);
+    assert.strictEqual(vs.sessionEndsAt, now + 86400e3, 'the end travels to the row, for the warning');
+    assert.ok(!JSON.stringify(view).includes('"R"'), 'still no token in the view');
+  } finally {
+    store.remove(over.id);
+    store.remove(soon.id);
+  }
+});
+
 async function checkAsync(name, fn) {
   try {
     await fn();
@@ -725,6 +748,22 @@ async function checkAsync(name, fn) {
       await new Promise((r) => holder.close(r));
     }
     assert.strictEqual(await terminal.loginPortFree(port), true, 'liberado, vuelve a estar libre');
+  });
+
+  await checkAsync('un login terminado no se intenta renovar: el swap dice qué hacer sin llamar a Anthropic', async () => {
+    const store = require('./lib/store');
+    const acc = store.add({
+      email: 'ended@x.y', profile: { accountUuid: 'uuid-ended' },
+      oauth: { accessToken: 'A', refreshToken: 'R', expiresAt: Date.now() - 1000, refreshTokenExpiresAt: Date.now() - 1000, scopes: ['user:profile'] },
+    });
+    let called = false;
+    const oauthLib = { refresh: async () => { called = true; throw new Error('invalid_grant'); }, toStoredOauth: (x) => x };
+    try {
+      await assert.rejects(swapLib.ensureFreshToken(store.get(acc.id), { store, oauth: oauthLib }), /terminó[\s\S]*30 días[\s\S]*token de un año/);
+      assert.strictEqual(called, false, 'no call to the token endpoint for a login that is over');
+    } finally {
+      store.remove(acc.id);
+    }
   });
 
   await checkAsync('la cabecera X-Swapper es obligatoria en toda la API, GET incluido', async () => {

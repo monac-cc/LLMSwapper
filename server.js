@@ -439,6 +439,12 @@ async function keepTokensAlive() {
     if (!o || !o.refreshToken) continue;
     const life = (o.expiresAt || 0) - Date.now();
     if (life > REFRESH_WHEN_UNDER_MS) continue;
+    if (store.sessionOver(account)) {
+      // Renewing never extends a login (store.sessionOver), and past its end Anthropic only answers
+      // invalid_grant. Say so plainly instead of calling it again every 6 hours.
+      console.warn(`  sesión terminada: ${account.email} (el login caducó el ${new Date(o.refreshTokenExpiresAt).toLocaleString('es-ES')}; renovar no lo alarga). Vuelve a entrar con esa cuenta e impórtala.`);
+      continue;
+    }
     try {
       const fresh = oauth.toStoredOauth(await oauth.refresh(o.refreshToken), o);
       store.update(account.id, { oauth: fresh });

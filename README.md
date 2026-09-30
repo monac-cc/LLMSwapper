@@ -121,7 +121,9 @@ the command for you.
 **Import a live session** - `claude` then `/login`, then press **import**. Full scope, so it
 identifies itself and reads quota for free.
 
-- Costs one login per account, and its refresh token dies after ~29 days without opening the panel.
+- Costs one login per account, and **each login lasts about 30 days**, fixed when you log in: renewing
+  rotates the tokens but never extends it. The row warns three days ahead; then log in again (Shift + click
+  import keeps your current session) or turn it into a one-year token.
 - **Shift + click** imports from a `CLAUDE_CONFIG_DIR=/tmp/other claude` session without disturbing yours.
 
 Adding the same account twice updates it in place.
@@ -316,7 +318,7 @@ you use fits, an issue naming it and where it stores credentials is the most use
 ## Development
 
 ```bash
-node test.js        # 97 checks, ~13 s, no external network
+node test.js        # 99 checks, ~13 s, no external network
 ```
 
 Every `fetch` is stubbed, so a run never spends the usage endpoint's budget. Each module has its

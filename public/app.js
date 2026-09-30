@@ -97,6 +97,8 @@ const I18N = {
     'note.ageMin': 'hace {m} min',
     'note.ageUnder': 'hace menos de un minuto',
     'note.expired': 'Token caducado. Haz /login con esta cuenta y vuelve a importarla.',
+    'note.sessionOver': 'Sesión terminada: Anthropic limita cada login a unos 30 días y renovar no lo alarga. Vuelve a entrar con esta cuenta en otra carpeta (Mayús+clic en import) o pásala a token de un año (añadir token).',
+    'note.sessionEnds': 'Su sesión termina en {in} y renovar no la alarga. Antes de eso, vuelve a entrar con ella en otra carpeta (Mayús+clic en import) o pásala a token de un año (añadir token).',
 
     'toast.added': 'Añadida: {name}',
     'toast.imported': 'Importada: {name}',
@@ -208,6 +210,8 @@ const I18N = {
     'note.ageMin': '{m} min ago',
     'note.ageUnder': 'less than a minute ago',
     'note.expired': 'Token expired. Run /login with this account and import it again.',
+    'note.sessionOver': 'Session over: Anthropic caps each login at about 30 days and renewing does not extend it. Sign in with this account in another folder (Shift+click import) or turn it into a one-year token (add token).',
+    'note.sessionEnds': 'Its session ends in {in} and renewing does not extend it. Before then, sign in with it again in another folder (Shift+click import) or turn it into a one-year token (add token).',
 
     'toast.added': 'Added: {name}',
     'toast.imported': 'Imported: {name}',
@@ -484,6 +488,25 @@ function noteFor(usage) {
   return { tone: 'warn', text: usage.error };
 }
 
+/** "2 d 5 h" / "5 h 12 min" / "12 min": a plain duration, without the meters' "resets in". */
+function inShort(ms) {
+  const m = Math.max(0, Math.floor(ms / 60000));
+  const d = Math.floor(m / 1440), h = Math.floor((m % 1440) / 60), min = m % 60;
+  return d > 0 ? `${d} d ${h} h` : h > 0 ? `${h} h ${min} min` : `${min} min`;
+}
+
+// An imported Claude login has a fixed end that renewing never moves (lib/store.js sessionOver).
+// Three days ahead is enough to act on; past it, nothing but a new login helps.
+const SESSION_WARN_MS = 3 * 24 * 60 * 60 * 1000;
+function sessionNote(account) {
+  const end = account && account.sessionEndsAt;
+  if (!end) return null;
+  const left = end - Date.now();
+  if (left <= 0) return { tone: 'error', text: t('note.sessionOver') };
+  if (left < SESSION_WARN_MS) return { tone: 'warn', text: t('note.sessionEnds', { in: inShort(left) }) };
+  return null;
+}
+
 function buildRow(account, target) {
   const node = tpl.content.firstElementChild.cloneNode(true);
   const usage = usageById[account.id];
@@ -502,7 +525,11 @@ function buildRow(account, target) {
   fillMeter($('.meter[data-kind="session"]', node), usable && usable.session);
   fillMeter($('.meter[data-kind="weekly"]', node), usable && usable.weekly, scoped);
 
-  const note = noteFor(usage);
+  // An error outranks a warning; between two of a kind, the session's end is the one to act on.
+  const sNote = sessionNote(account);
+  const uNote = noteFor(usage);
+  const note = (sNote && sNote.tone === 'error') ? sNote : (uNote && uNote.tone === 'error') ? uNote : (sNote || uNote);
+  if (sNote && sNote.tone === 'error') node.classList.add('is-error');
   const noteEl = $('.row-note', node);
   if (note) {
     noteEl.hidden = false;

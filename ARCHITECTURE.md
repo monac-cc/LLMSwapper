@@ -188,7 +188,14 @@ perfectly good account for an hour and a half with its five-hour window at 0%.
 
 ### Token lifetimes (imported accounts)
 
-Access ~8 h, refresh ~29 days, rotating on every use. A background keep-alive renews anything
+Access ~8 h. The refresh token rotates on every use, but the **login** behind it has a fixed end:
+every refresh answers a `refresh_expires_in` that counts down to the same instant, so
+`refreshTokenExpiresAt` stayed identical to the millisecond across five days of rotations on three
+accounts. About 30 days after `/login` the account needs a new one, whatever the keep-alive does.
+`store.sessionOver` names that state; the row warns three days ahead, the swap and the keep-alive
+stop calling the token endpoint for it, and say what to do.
+
+A background keep-alive renews anything
 with under a day of life left, every 6 hours. Because refreshing **invalidates the previous
 refresh token**, renewing the account whose session is live also writes the new pair into the
 live credentials - otherwise Claude Code would be left holding a dead token.
