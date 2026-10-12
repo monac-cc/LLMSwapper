@@ -35,15 +35,30 @@ export const hostEntry = z.object({
 export type HostEntry = z.output<typeof hostEntry>;
 export const DEFAULT_HOST_ENTRY: HostEntry = { bridge: false, port: DEFAULT_PORT, hidden: false };
 
+export const DEFAULT_REFRESH_MINUTES = 5;
+
+/**
+ * v1 -> v2: auto-refresh went from off by default to every 5 minutes. A v1 document holds an explicit
+ * 0 even if nobody chose it: saving a per-host opt-in wrote every default. So 0 (or a missing value)
+ * becomes 5; any other choice is kept. Runs on the host when it reads an older document.
+ */
+export function migrateSettings(values: unknown, fromVersion: number): unknown {
+  if (!values || typeof values !== "object" || Array.isArray(values)) return values;
+  const v: Record<string, unknown> = { ...(values as Record<string, unknown>) };
+  if (fromVersion < 2 && (v.autoRefreshMinutes === 0 || v.autoRefreshMinutes === undefined)) v.autoRefreshMinutes = DEFAULT_REFRESH_MINUTES;
+  return v;
+}
+
 export const swapperSettings = defineSettings({
   id: "config",
   scope: "host",
-  version: 1,
+  version: 2,
+  migrate: migrateSettings,
   schema: z.object({
     /** LLMswapper port of the plugin's own daemon. Read ONLY by the server. */
     localPort: Port.default(DEFAULT_PORT),
     /** 0 = off; otherwise minutes between automatic refreshes while the panel is mounted. */
-    autoRefreshMinutes: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(15), z.literal(30)]).default(0),
+    autoRefreshMinutes: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(15), z.literal(30)]).default(DEFAULT_REFRESH_MINUTES),
     /** Diagnostics: reach this daemon's own LLMswapper through the terminal bridge instead of RPC. */
     bridgeForLocal: z.boolean().default(false),
     hosts: z.record(z.string(), hostEntry).default({}),
