@@ -4,7 +4,7 @@ import path from "node:path";
 
 /** Typed locally: the main tsconfig has React Native globals, not @types/node. */
 const proc = (globalThis as unknown as {
-  process: { execPath: string; platform: string; env: Record<string, string | undefined> };
+  process: { execPath: string; platform: string; argv: string[]; env: Record<string, string | undefined> };
 }).process;
 
 export interface CliResult {
@@ -21,21 +21,37 @@ export interface CliCommand {
   readonly env: Readonly<Record<string, string>>;
 }
 
+const ELECTRON_ENV = { ELECTRON_RUN_AS_NODE: "1", PASEO_NODE_ENV: "production" } as const;
+
 /**
- * The Paseo CLI, launched the way the desktop app's resources\bin\paseo.cmd does it but WITHOUT cmd.exe:
- * the plugin subprocess is Paseo.exe itself (Electron as Node), so its execPath sits next to resources/.
- * Elsewhere (CLI/npm installs on Linux or macOS) `paseo` from PATH. Windows never goes through a shell.
+ * The Paseo CLI, without any shell (Windows never goes through cmd.exe). In order:
+ * 1. Desktop app: the plugin subprocess is the app binary itself (Electron as Node), launched the way
+ *    resources/bin/paseo(.cmd) does it. resources/ sits next to the binary on Windows and Linux, and in
+ *    Paseo.app/Contents/Resources on macOS.
+ * 2. npm/CLI daemon: the plugin subprocess runs node_modules/@getpaseo/server/.../plugin-process.js, so
+ *    the CLI package is its sibling node_modules/@getpaseo/cli, run with the same Node.
+ * 3. `paseo` from PATH (POSIX only).
  */
-export function resolveCli(execPath = proc.execPath, platform = proc.platform, exists: (p: string) => boolean = fs.existsSync): CliCommand | null {
-  const resources = path.join(path.dirname(execPath), "resources");
-  const runner = path.join(resources, "app.asar.unpacked", "dist", "daemon", "node-entrypoint-runner.js");
-  const asar = path.join(resources, "app.asar");
-  if (exists(runner) && exists(asar)) {
-    return {
-      command: execPath,
-      prefix: ["--disable-warning=DEP0040", runner, "node-script", path.join(asar, "node_modules", "@getpaseo", "cli", "dist", "index.js")],
-      env: { ELECTRON_RUN_AS_NODE: "1", PASEO_NODE_ENV: "production" },
-    };
+export function resolveCli(
+  execPath = proc.execPath, platform = proc.platform, exists: (p: string) => boolean = fs.existsSync, entry: string | undefined = proc.argv[1],
+): CliCommand | null {
+  const p = platform === "win32" ? path.win32 : path.posix;
+  const dir = p.dirname(execPath);
+  for (const resources of [p.join(dir, "resources"), p.join(dir, "..", "Resources")]) {
+    const runner = p.join(resources, "app.asar.unpacked", "dist", "daemon", "node-entrypoint-runner.js");
+    const asar = p.join(resources, "app.asar");
+    if (exists(runner) && exists(asar)) {
+      return {
+        command: execPath,
+        prefix: ["--disable-warning=DEP0040", runner, "node-script", p.join(asar, "node_modules", "@getpaseo", "cli", "dist", "index.js")],
+        env: ELECTRON_ENV,
+      };
+    }
+  }
+  const m = entry ? /^(.*)[\\/]@getpaseo[\\/]server[\\/]/.exec(entry) : null;
+  if (m) {
+    const cli = p.join(m[1], "@getpaseo", "cli", "dist", "index.js");
+    if (exists(cli)) return { command: execPath, prefix: [cli], env: {} };
   }
   return platform === "win32" ? null : { command: "paseo", prefix: [], env: {} };
 }

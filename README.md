@@ -274,7 +274,7 @@ the running panel. They work from **any** Claude Code session, not just one open
 
 ## Paseo plugin
 
-[`paseo-plugin/`](paseo-plugin/README.md) shows the LLMswapper of every paired [Paseo](https://paseo.sh) device in one compact panel, one tile per account with its 5-hour and 7-day bars, and switches the account on any of them. Install it with `paseo plugin add git:monac-cc/LLMSwapper:paseo-plugin`.
+[`paseo-plugin/`](paseo-plugin/README.md) shows the LLMswapper of every paired [Paseo](https://paseo.sh) device in one compact panel, one row per account with its 5-hour and 7-day bars, and switches the account on any of them. Install it with `paseo plugin add git:monac-cc/LLMSwapper:paseo-plugin`.
 
 It also makes a switch reach the **current** session. A running Claude Code keeps its token in memory, so after a switch the plugin has Paseo reload that machine's Claude agents, which resume the same conversation on the new account: idle ones at once, busy ones when their turn ends. Switches made here, by `/swapper` or by automatic rotation count too.
 

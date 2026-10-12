@@ -1,6 +1,6 @@
 # LLMswapper for Paseo
 
-A [Paseo](https://paseo.sh) plugin that puts every device's [LLMswapper](../README.md) in one compact panel: one tile per account with its 5-hour and 7-day usage, and a press to switch the active Claude account on any paired device. What a user sees in Paseo is in [OVERVIEW.md](OVERVIEW.md).
+A [Paseo](https://paseo.sh) plugin that puts every device's [LLMswapper](../README.md) in one compact panel: one row per account with its 5-hour and 7-day bars, and a press to switch the active Claude account on any paired device. What a user sees in Paseo is in [OVERVIEW.md](OVERVIEW.md).
 
 Requires Paseo 0.11.2 or newer and LLMswapper running on each device.
 

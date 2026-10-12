@@ -59,21 +59,23 @@ export function makeStyles(theme: PluginTheme, compact: boolean) {
     hostBlock: { gap: 6 },
     hostHeader: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 6 },
     hostName: { color: c.foreground, fontSize: 12, fontWeight: "600" },
-    envChip: { flexDirection: "row", alignItems: "center", gap: 3, backgroundColor: c.surface2, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
-    envText: { color: c.foregroundMuted, fontSize: 10 },
     tiny: { color: c.foregroundMuted, fontSize: 9 },
     iconButton: { padding: 4, borderRadius: 4 },
     pill: { borderRadius: 4, borderWidth: 1, paddingHorizontal: 5, paddingVertical: 1, flexDirection: "row", alignItems: "center", gap: 3 },
-    tiles: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-    tile: {
-      width: 122, backgroundColor: c.surface1, borderColor: c.border, borderWidth: 1, borderRadius: 8,
-      paddingHorizontal: 8, paddingTop: 7, paddingBottom: 6, gap: 5, alignItems: "center",
+    // one row per account: name | 5 h bar over 7 d bar
+    lines: { gap: 2 },
+    line: {
+      flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4, paddingLeft: 6, paddingRight: 2,
+      borderLeftWidth: 2, borderLeftColor: "transparent", borderRadius: 3,
     },
-    tileName: { color: c.foreground, fontSize: 12, fontWeight: "600", textAlign: "center", maxWidth: 106 },
-    tileBadges: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 3, minHeight: 13 },
-    tileBadge: { borderRadius: 3, borderWidth: 1, paddingHorizontal: 4 },
-    tileBadgeText: { fontSize: 8, fontWeight: "600" },
-    pct: { fontSize: 12, fontWeight: "700", fontVariant: ["tabular-nums"] },
+    lineName: { width: 78, minWidth: 0 },
+    lineLabel: { color: c.foreground, fontSize: 11, fontWeight: "600", flexShrink: 1 },
+    lineBars: { flex: 1, minWidth: 0, gap: 4 },
+    lineBarRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+    // the bar gives way first: the numbers never shrink into "10…"
+    lineTrack: { flex: 1, minWidth: 12, height: 4, borderRadius: 2, backgroundColor: c.surface2 },
+    linePct: { minWidth: 30, flexShrink: 0, textAlign: "right", fontSize: 10, fontWeight: "700", fontVariant: ["tabular-nums"] },
+    lineReset: { minWidth: 36, flexShrink: 0, color: c.foregroundMuted, fontSize: 9, fontVariant: ["tabular-nums"] },
   });
 }
 export type Styles = ReturnType<typeof makeStyles>;
