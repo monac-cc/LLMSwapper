@@ -38,3 +38,13 @@ test("pace tone reproduces the reference screenshot", () => {
   assert.equal(paceTone(20, 0), "series"); // below 25 % nothing is "ahead"
   assert.equal(paceTone(null, 50), "unknown");
 });
+
+test("settings v1 -> v2: the unchosen 0 becomes a 5-minute auto-refresh, real choices survive", async () => {
+  const { migrateSettings, swapperSettings } = await import("../shared/contracts.ts");
+  assert.deepEqual(migrateSettings({ autoRefreshMinutes: 0, hosts: { a: { bridge: true } } }, 1), { autoRefreshMinutes: 5, hosts: { a: { bridge: true } } });
+  assert.deepEqual(migrateSettings({ hosts: {} }, 1), { hosts: {}, autoRefreshMinutes: 5 });
+  assert.deepEqual(migrateSettings({ autoRefreshMinutes: 15 }, 1), { autoRefreshMinutes: 15 });
+  assert.deepEqual(migrateSettings({ autoRefreshMinutes: 0 }, 2), { autoRefreshMinutes: 0 }, "a v2 'Desactivada' stays off");
+  assert.equal(swapperSettings.version, 2);
+  assert.equal(swapperSettings.schema.parse({}).autoRefreshMinutes, 5, "fresh installs refresh every 5 minutes");
+});
