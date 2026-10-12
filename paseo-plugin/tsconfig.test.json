@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node"] },
+  "include": ["shared/**/*.ts", "server/**/*.ts", "client/bridge/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "client/bridge/runner.ts"]
+}
