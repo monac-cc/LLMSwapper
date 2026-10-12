@@ -1,0 +1,8 @@
+{
+  "id": "llmswapper",
+  "name": "LLMswapper",
+  "media": [],
+  "requirements": {
+    "paseo": ">=0.11.2"
+  }
+}

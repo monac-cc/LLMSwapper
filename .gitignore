@@ -1,5 +1,7 @@
 # Contains live OAuth tokens for real paid accounts. Never commit, never share.
 data/
+# Not the token store: the Paseo plugin's client data layer is source code.
+!paseo-plugin/client/data/
 
 node_modules/
 *.tmp

@@ -28,6 +28,30 @@ jobs:
       # from. Adding an install step here would only invent a way for CI to fail.
       - run: node test.js
 
+  # The Paseo plugin is TypeScript with dev-only dependencies (types), unlike the app. Its tests run
+  # straight from .ts through Node's type stripping, unflagged from 22.18. check:bundle needs the
+  # Paseo desktop app's compiler, so it stays a local check.
+  paseo-plugin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: paseo-plugin
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
   docker:
     runs-on: ubuntu-latest
     steps:

@@ -9,6 +9,9 @@ node_modules/
 *.log
 *.tmp
 
+# El plugin de Paseo se instala en Paseo, no corre en esta imagen.
+paseo-plugin/
+
 # Documentación y metadatos: no los necesita el runtime y solo invalidan la caché de capas.
 *.md
 .github/
