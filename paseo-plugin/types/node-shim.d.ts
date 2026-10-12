@@ -23,6 +23,7 @@ declare module "node:fs" {
   export default fs;
 }
 declare module "node:path" {
-  const path: { join(...parts: string[]): string; dirname(path: string): string };
+  interface PathApi { join(...parts: string[]): string; dirname(path: string): string }
+  const path: PathApi & { readonly win32: PathApi; readonly posix: PathApi };
   export default path;
 }

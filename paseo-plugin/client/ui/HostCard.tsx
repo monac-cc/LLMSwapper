@@ -10,9 +10,9 @@ import type { BriefView, StateView } from "../../shared/views.ts";
 import { forgetHost, opErrorOf, refreshHost, useHostBusy, useHostState, useHostUsage } from "../data/queries.ts";
 import type { Transport } from "../data/transport.ts";
 import { useHostActions } from "../data/use-host-actions.ts";
-import { AccountTile } from "./AccountTile.tsx";
+import { AccountLine } from "./AccountLine.tsx";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
-import { AutoPill, CompactWarnings, EnvChips, IconBtn, InlineNotice } from "./HostSections.tsx";
+import { AutoPill, CompactWarnings, IconBtn, InlineNotice } from "./HostSections.tsx";
 import type { Styles } from "./theme.ts";
 
 const STATUS_TEXT: Record<PluginHostSummary["status"], string> = {
@@ -25,7 +25,7 @@ function briefFor(state: StateView, id: string): BriefView | undefined {
   return a.current?.id === id ? a.current : a.queue.find((q) => q.id === id);
 }
 
-/** One host: a single header line, a few one-line notices, then a wrapping row of account tiles. */
+/** One host: a single header line, a few one-line notices, then one compact row per account. */
 export function HostCard(p: {
   host: PluginHostSummary; isPluginHost: boolean; transport: Transport; refreshMs: number | false; now: number; styles: Styles; theme: PluginTheme;
 }) {
@@ -60,7 +60,6 @@ export function HostCard(p: {
         <View style={[styles.dot, { backgroundColor: dot }]} />
         <Text style={styles.hostName} numberOfLines={1}>{host.label}</Text>
         {t.kind(id) === "bridge" && enabled ? <Text style={styles.tiny}>· terminal</Text> : null}
-        {data ? <EnvChips targets={data.targets} accounts={data.accounts} styles={styles} theme={theme} /> : null}
         {data ? <AutoPill auto={data.auto} disabled={locked} onToggle={(v) => a.toggleAuto(v, data)} styles={styles} theme={theme} /> : null}
         <View style={{ flex: 1 }} />
         <Text style={styles.tiny}>{data && state.dataUpdatedAt ? formatAgo(state.dataUpdatedAt, now) : STATUS_TEXT[host.status]}</Text>
@@ -111,9 +110,9 @@ export function HostCard(p: {
           <CompactWarnings warnings={data.warnings} styles={styles} theme={theme} />
           {usageError ? <InlineNotice tone="muted" text={`Consumo no disponible: ${describeError(usageError).title}.`} styles={styles} theme={theme} /> : null}
           {data.accounts.length === 0 ? <Text style={styles.tiny}>LLMswapper no tiene cuentas guardadas en este equipo.</Text> : null}
-          <View style={styles.tiles}>
+          <View style={styles.lines}>
             {data.accounts.map((acc) => (
-              <AccountTile key={acc.id} account={acc} targets={data.targets} usage={usage.data?.byId[acc.id]} brief={briefFor(data, acc.id)}
+              <AccountLine key={acc.id} account={acc} targets={data.targets} usage={usage.data?.byId[acc.id]} brief={briefFor(data, acc.id)}
                 disabled={locked || !acc.swappable || usable.every((x) => x.activeId === acc.id)}
                 pending={a.pendingSwap?.accountId === acc.id} onPress={() => a.chooseSwap(acc, data)}
                 now={now} styles={styles} theme={theme} />

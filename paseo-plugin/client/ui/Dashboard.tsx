@@ -10,7 +10,22 @@ import { useTransport } from "../data/transport.ts";
 import { useNow } from "../data/use-now.ts";
 import { HostCard } from "./HostCard.tsx";
 import { IconBtn } from "./HostSections.tsx";
-import { makeStyles } from "./theme.ts";
+import { makeStyles, seriesColors, type Styles } from "./theme.ts";
+
+/** Which bar is which: top = 5 h session, bottom = 7 d week. */
+function SeriesLegend(p: { styles: Styles; theme: PluginTheme }) {
+  const s = seriesColors(p.theme);
+  return (
+    <View style={[p.styles.row, { gap: 6 }]} accessibilityLabel="Barra superior: 5 horas. Barra inferior: 7 días.">
+      {[["5h", s.session], ["7d", s.weekly]].map(([label, color]) => (
+        <View key={label} style={[p.styles.row, { gap: 3 }]}>
+          <View style={{ width: 8, height: 3, borderRadius: 1, backgroundColor: color }} />
+          <Text style={p.styles.tiny}>{label}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 const RANK: Record<PluginHostSummary["status"], number> = { online: 0, connecting: 1, idle: 2, error: 3, offline: 4 };
 
@@ -39,7 +54,8 @@ export function Dashboard(p: { theme: PluginTheme; layout: PluginHostProps["layo
     <View style={styles.root}>
       <View style={[styles.row, { paddingHorizontal: 10, paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: p.theme.colors.border }]}>
         <Text style={[styles.hostName, { flex: 1 }]}>LLMswapper</Text>
-        <Text style={styles.tiny}>{`${online}/${list.length} en línea${refreshMs ? ` · auto ${values?.autoRefreshMinutes} min` : ""}`}</Text>
+        <SeriesLegend styles={styles} theme={p.theme} />
+        <Text style={styles.tiny} numberOfLines={1}>{`${online}/${list.length} en línea`}</Text>
         <IconBtn icon="RefreshCw" label="Actualizar todo" busy={fetching} onPress={() => void refreshAll(qc)} styles={styles} theme={p.theme} />
       </View>
       <ScrollView contentContainerStyle={{ padding: 10, gap: 14 }}>

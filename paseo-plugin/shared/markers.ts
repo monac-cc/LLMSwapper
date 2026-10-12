@@ -1,10 +1,12 @@
-import { formatAgo, formatCountdown, severityOf } from "./format.ts";
+import { formatAgo, formatCountdown, formatShortCountdown, severityOf } from "./format.ts";
 import type { AccountView, BriefView, MeterView, UsageEntryView } from "./views.ts";
 
 export type Tone = "muted" | "success" | "warning" | "danger";
 export interface Marker {
   readonly key: string;
   readonly label: string;
+  /** Fits a ~78 px, 9 px column (about 14 characters). The full `label` goes to the accessibility label. */
+  readonly short: string;
   readonly tone: Tone;
 }
 
@@ -13,22 +15,22 @@ const THREE_DAYS = 3 * 24 * 3600_000;
 /** Badges under an account row. Pure (unit-tested). */
 export function accountMarkers(a: AccountView, u: UsageEntryView | undefined, now: number): Marker[] {
   const m: Marker[] = [];
-  if (a.tokenExpired) m.push({ key: "expired", label: "Token caducado", tone: "danger" });
+  if (a.tokenExpired) m.push({ key: "expired", label: "Token caducado", short: "Token caducado", tone: "danger" });
   if (u?.kind === "error") {
-    if (u.needsRelogin) m.push({ key: "relogin", label: "Hay que volver a añadir la cuenta (token rechazado)", tone: "danger" });
-    else if (u.rateLimited) m.push({ key: "429", label: `API de uso limitada${u.retryInS ? `, reintento en ${Math.ceil(u.retryInS / 60)} min` : ""}`, tone: "warning" });
-    else if (u.throttled) m.push({ key: "throttled", label: "Lectura de consumo en cola", tone: "muted" });
-    else m.push({ key: "usage-error", label: `Sin datos de consumo: ${u.message}`, tone: "warning" });
+    if (u.needsRelogin) m.push({ key: "relogin", label: "Hay que volver a añadir la cuenta (token rechazado)", short: "Volver a añadir", tone: "danger" });
+    else if (u.rateLimited) m.push({ key: "429", label: `API de uso limitada${u.retryInS ? `, reintento en ${Math.ceil(u.retryInS / 60)} min` : ""}`, short: u.retryInS ? `API 429 · ${Math.ceil(u.retryInS / 60)} min` : "API 429", tone: "warning" });
+    else if (u.throttled) m.push({ key: "throttled", label: "Lectura de consumo en cola", short: "En cola", tone: "muted" });
+    else m.push({ key: "usage-error", label: `Sin datos de consumo: ${u.message}`, short: "Sin consumo", tone: "warning" });
   }
   if (u?.kind === "ok" && u.stale) {
-    m.push({ key: "stale", label: `Datos antiguos${u.stale.since ? ` (${formatAgo(u.stale.since, now)})` : ""}`, tone: "warning" });
+    m.push({ key: "stale", label: `Datos antiguos${u.stale.since ? ` (${formatAgo(u.stale.since, now)})` : ""}`, short: u.stale.since ? `Antiguo, ${formatAgo(u.stale.since, now)}` : "Datos antiguos", tone: "warning" });
   }
-  if (u?.kind === "ok" && u.queuedRetryInS !== null) m.push({ key: "queued", label: "Actualización en cola", tone: "muted" });
+  if (u?.kind === "ok" && u.queuedRetryInS !== null) m.push({ key: "queued", label: "Actualización en cola", short: "En cola", tone: "muted" });
   if (a.sessionEndsAt !== null && a.sessionEndsAt - now < THREE_DAYS) {
-    m.push({ key: "session-ends", label: `La sesión caduca ${formatCountdown(a.sessionEndsAt, now)}`, tone: a.sessionEndsAt <= now ? "danger" : "warning" });
+    m.push({ key: "session-ends", label: `La sesión caduca ${formatCountdown(a.sessionEndsAt, now)}`, short: a.sessionEndsAt <= now ? "Sesión caducada" : `Caduca ${formatShortCountdown(a.sessionEndsAt, now)}`, tone: a.sessionEndsAt <= now ? "danger" : "warning" });
   }
-  if (!a.canReadUsage) m.push({ key: "probe", label: "Consumo vía sonda (~9 tokens por lectura)", tone: "muted" });
-  if (!a.renewable) m.push({ key: "pasted", label: "Token pegado: no se renueva solo", tone: "muted" });
+  if (!a.canReadUsage) m.push({ key: "probe", label: "Consumo vía sonda (~9 tokens por lectura)", short: "Sonda", tone: "muted" });
+  if (!a.renewable) m.push({ key: "pasted", label: "Token pegado: no se renueva solo", short: "Token pegado", tone: "muted" });
   return m;
 }
 

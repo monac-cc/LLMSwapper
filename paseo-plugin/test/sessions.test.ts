@@ -93,13 +93,34 @@ test("without the Paseo CLI nothing runs and the note says so", async () => {
 
 test("CLI resolution: desktop install launches Paseo.exe without cmd.exe; Windows without it gives up", () => {
   const exe = "C:\\Users\\u\\AppData\\Local\\Programs\\Paseo\\Paseo.exe";
-  const c = resolveCli(exe, "win32", () => true);
+  const c = resolveCli(exe, "win32", () => true, undefined);
   assert.ok(c);
   assert.equal(c.command, exe);
   assert.equal(c.env.ELECTRON_RUN_AS_NODE, "1");
   assert.ok(c.prefix.some((p) => p.endsWith("index.js")));
-  assert.equal(resolveCli(exe, "win32", () => false), null);
-  assert.equal(resolveCli("/usr/bin/node", "linux", () => false)?.command, "paseo");
+  assert.equal(resolveCli(exe, "win32", () => false, undefined), null);
+  assert.equal(resolveCli("/usr/bin/node", "linux", () => false, undefined)?.command, "paseo");
+});
+
+test("CLI resolution: macOS app bundle, Linux desktop and npm daemons", () => {
+  const has = (paths: string[]) => (p: string) => paths.includes(p);
+  const mac = "/Applications/Paseo.app/Contents/MacOS/Paseo";
+  const macRes = "/Applications/Paseo.app/Contents/Resources";
+  const m = resolveCli(mac, "darwin", has([`${macRes}/app.asar.unpacked/dist/daemon/node-entrypoint-runner.js`, `${macRes}/app.asar`]), undefined);
+  assert.equal(m?.command, mac);
+  assert.ok(m?.prefix.includes(`${macRes}/app.asar/node_modules/@getpaseo/cli/dist/index.js`), JSON.stringify(m));
+  const lin = "/opt/Paseo/paseo";
+  const l = resolveCli(lin, "linux", has(["/opt/Paseo/resources/app.asar.unpacked/dist/daemon/node-entrypoint-runner.js", "/opt/Paseo/resources/app.asar"]), undefined);
+  assert.equal(l?.env.ELECTRON_RUN_AS_NODE, "1");
+  // npm/CLI daemon: plugin-process.js lives in node_modules/@getpaseo/server; the CLI is its sibling package.
+  const nm = "/home/u/.npm-global/lib/node_modules";
+  const entry = `${nm}/@getpaseo/server/dist/server/server/plugins/plugin-process.js`;
+  const n = resolveCli("/usr/bin/node", "linux", has([`${nm}/@getpaseo/cli/dist/index.js`]), entry);
+  assert.deepEqual(n, { command: "/usr/bin/node", prefix: [`${nm}/@getpaseo/cli/dist/index.js`], env: {} });
+  // same on Windows with backslashes
+  const wnm = "C:\\Users\\u\\AppData\\Roaming\\npm\\node_modules";
+  const w = resolveCli("C:\\Program Files\\nodejs\\node.exe", "win32", has([`${wnm}\\@getpaseo\\cli\\dist\\index.js`]), `${wnm}\\@getpaseo\\server\\dist\\server\\server\\plugins\\plugin-process.js`);
+  assert.equal(w?.prefix[0], `${wnm}\\@getpaseo\\cli\\dist\\index.js`);
 });
 
 const targets = (active: string | null): ExecResults => ({

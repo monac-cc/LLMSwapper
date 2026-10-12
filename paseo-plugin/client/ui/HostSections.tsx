@@ -2,7 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import type { Tone } from "../../shared/markers.ts";
-import type { AccountView, AutoView, TargetView, WarningView } from "../../shared/views.ts";
+import type { AutoView, WarningView } from "../../shared/views.ts";
 import { toneColor, type Styles } from "./theme.ts";
 
 interface Base {
@@ -29,25 +29,6 @@ export function CompactWarnings(p: Base & { warnings: readonly WarningView[] }) 
         );
       })}
     </View>
-  );
-}
-
-/** "Windows · CTO", "Ubuntu · Ojueguen": where each environment points right now. */
-export function EnvChips(p: Base & { targets: readonly TargetView[]; accounts: readonly AccountView[] }) {
-  return (
-    <>
-      {p.targets.map((t) => {
-        const active = p.accounts.find((a) => a.id === t.activeId);
-        const who = active ? active.label : t.activeId ? "?" : "—";
-        return (
-          <View key={t.id} style={p.styles.envChip} accessibilityLabel={`${t.label}: ${active ? active.label : "sin cuenta activa"}${t.running ? ", Claude abierto" : ""}`}>
-            <Icon name={t.kind === "wsl" ? "Terminal" : "Monitor"} size={10} color={p.theme.colors.foregroundMuted} />
-            <Text style={p.styles.envText} numberOfLines={1}>{`${t.label} · ${who}`}</Text>
-            {t.running ? <View style={[p.styles.dot, { width: 5, height: 5, backgroundColor: p.theme.colors.statusWarning }]} /> : null}
-          </View>
-        );
-      })}
-    </>
   );
 }
 

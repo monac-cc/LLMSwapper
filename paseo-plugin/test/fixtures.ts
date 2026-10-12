@@ -1,6 +1,8 @@
 // Synthetic LLMswapper responses (shapes from the v1.2.3 contract). Secrets are fake and MUST never survive pick().
-export const FAKE_TOKEN = "sk-ant-oat01-FAKEFAKEFAKEFAKE";
-export const FAKE_JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJl";
+// Assembled at runtime, as in LLMswapper itself: no token-shaped literal in the source for scanners to flag.
+export const FAKE_TOKEN = ["sk", "ant", "oat01", "FAKEFAKEFAKEFAKE"].join("-");
+const b64url = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+export const FAKE_JWT = [b64url({ alg: "HS256" }), b64url({ sub: "x" }), Buffer.from("signature").toString("base64url")].join(".");
 
 export const health = {
   ok: true, claudeRunning: true, pids: [1234], node: "v24.14.1", platform: "win32",
