@@ -132,6 +132,7 @@ const I18N = {
     'codex.login.submit': 'importar',
     'codex.toast.loginOpened': 'Terminal abierta ({how}). Termina el login en el navegador y pulsa importar.',
     'codex.noSession': 'OpenAI no le aplica límite de 5 h ahora',
+    'activeIn': 'En uso en {env}. Esta cuenta renueva su token rotando y dos copias se anulan: cambia {env} a otra cuenta para traerla aquí, o pásala a token de un año.',
     'codex.activeIn': 'En uso en {env}. Una cuenta de Codex solo puede estar en un entorno: cambia {env} a otra cuenta para traerla aquí.',
     'codex.toast.loginDevice': 'Terminal abierta ({how}). Windows tiene reservado el puerto del login por navegador, así que usa el código: abre el enlace que muestra, escribe el código, y luego pulsa importar.',
     'codex.toast.imported': 'Cuenta de Codex importada: {name}',
@@ -246,6 +247,7 @@ const I18N = {
     'codex.login.submit': 'import',
     'codex.toast.loginOpened': 'Terminal opened ({how}). Finish the login in the browser, then press import.',
     'codex.noSession': 'OpenAI applies no 5-hour limit to it right now',
+    'activeIn': 'In use in {env}. This account renews its token by rotating it and two copies cancel each other: switch {env} to another account to bring it here, or turn it into a one-year token.',
     'codex.activeIn': 'In use in {env}. A Codex account can be in one environment only: switch {env} to another account to bring it here.',
     'codex.toast.loginDevice': 'Terminal opened ({how}). Windows reserves the browser login\'s port, so use the code: open the link it shows, type the code, then press import.',
     'codex.toast.imported': 'Codex account imported: {name}',
@@ -535,7 +537,7 @@ function buildRow(account, target) {
 
   // Codex: one environment per account (lib/codex/swap.js). Said here, before a click is refused.
   const elsewhere = (account.activeIn || []).map((id) => (targetList.find((x) => x.id === id) || {}).label || id.replace(/^wsl:/, ''));
-  const eNote = elsewhere.length && !isActive ? { tone: 'warn', text: t('codex.activeIn', { env: elsewhere.join(', ') }) } : null;
+  const eNote = elsewhere.length && !isActive ? { tone: 'warn', text: t('activeIn', { env: elsewhere.join(', ') }) } : null;
   // An error outranks a warning; between two of a kind, the session's end is the one to act on.
   const sNote = sessionNote(account) || eNote;
   const uNote = noteFor(usage);

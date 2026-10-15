@@ -213,6 +213,10 @@ Codex's own limits, and the panel's:
   desktop app is not touched: reopen it.
 - **Open sessions keep the old account.** A running Codex does not watch `auth.json`; the swap
   reaches the next `codex` you start there. The panel warns when one is open (the desktop app counts).
+- **Want one account in Windows and WSL at once?** Link the distro's file to the Windows one, once,
+  inside the distro: `ln -sf /mnt/c/Users/<you>/.codex/auth.json ~/.codex/auth.json`. Then there is a
+  single file, Codex coordinates its refreshes through it (verified: it writes through the link), the
+  WSL tab disappears from the Codex view and every swap on Windows applies to both.
 - **One environment per account at a time.** Codex refresh tokens rotate, and the old one dies on
   use: two `auth.json` files holding the same one kill each other on the first refresh. Swapping an
   account into a second environment is refused until the first one is switched to another account.
@@ -331,7 +335,7 @@ you use fits, an issue naming it and where it stores credentials is the most use
 ## Development
 
 ```bash
-node test.js        # 100 checks, ~13 s, no external network
+node test.js        # 101 checks, ~13 s, no external network
 ```
 
 Every `fetch` is stubbed, so a run never spends the usage endpoint's budget. Each module has its

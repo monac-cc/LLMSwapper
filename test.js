@@ -766,6 +766,38 @@ async function checkAsync(name, fn) {
     }
   });
 
+  await checkAsync('claude: una cuenta importada (token que rota) solo puede estar activa en un entorno; un token de un año, en varios', async () => {
+    const store = require('./lib/store');
+    const claudeTargets = require('./lib/targets');
+    const realList = claudeTargets.list;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-one-env-'));
+    const mk = (name) => {
+      const dir = path.join(tmp, name.replace(/[:]/g, '_'));
+      fs.mkdirSync(path.join(dir, '.claude'), { recursive: true });
+      return { id: name, kind: name === 'host' ? 'host' : 'wsl', label: name, claudeJsonPath: path.join(dir, '.claude.json'), credentialsPath: path.join(dir, '.claude', '.credentials.json'), fileBackend: true };
+    };
+    const win = mk('host'), ubuntu = mk('wsl:Ubuntu');
+    claudeTargets.list = () => [win, ubuntu];
+    const imported = store.add({ email: 'rot@x.y', profile: { accountUuid: 'uuid-rot' }, oauth: { accessToken: 'A1', refreshToken: 'R1', expiresAt: Date.now() + 3600e3, refreshTokenExpiresAt: Date.now() + 9e8, scopes: ['user:profile'] } });
+    const pasted = store.add({ oauth: { accessToken: 'TOKEN-YEAR', refreshToken: null, expiresAt: Date.now() + 9e9, scopes: ['user:inference'] }, label: 'Year' });
+    try {
+      // Ubuntu has the imported account live: its config names it.
+      fs.writeFileSync(ubuntu.claudeJsonPath, JSON.stringify({ oauthAccount: { accountUuid: 'uuid-rot' } }));
+      await assert.rejects(swapLib.swapTo(imported.id, { store, oauth: {}, usage: {} }, win),
+        (err) => err.status === 409 && /ya está activa en wsl:Ubuntu[\s\S]*token de un año/.test(err.message));
+      assert.ok(!fs.existsSync(win.credentialsPath), 'refused before anything was written');
+      store.setActive(imported.id, 'wsl:Ubuntu');
+      assert.deepStrictEqual(store.publicView('host').accounts.find((a) => a.id === imported.id).activeIn, ['wsl:Ubuntu'], 'the row says where, before the click');
+      store.setActive(pasted.id, 'wsl:Ubuntu');
+      assert.deepStrictEqual(store.publicView('host').accounts.find((a) => a.id === pasted.id).activeIn, [], 'a year-long token is never held back');
+    } finally {
+      claudeTargets.list = realList;
+      store.remove(imported.id);
+      store.remove(pasted.id);
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   await checkAsync('la cabecera X-Swapper es obligatoria en toda la API, GET incluido', async () => {
     // Un <img src="http://127.0.0.1:7373/api/health"> desde cualquier web pasaba las tres
     // guardas: sin Origin, método GET, y Host correcto. Cada llamada lanza un tasklist.
