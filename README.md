@@ -207,7 +207,8 @@ Codex's own limits, and the panel's:
 - **Long-lived Codex processes are restarted on swap.** Codex reads `auth.json` only when it starts, and
   Paseo keeps one `codex app-server` per agent, so its agents kept spending the old account. After a swap
   the panel stops the CLI's `codex app-server` processes in that environment; Paseo starts a fresh one
-  on the agent's next message, on the new account. A reply in progress at that moment is cut. The
+  on the agent's next message, on the new account. A running managed daemon (the one terminal `codex`
+  sessions talk to) is restarted with Codex's own `codex app-server daemon restart`. A reply in progress at that moment is cut. The
   desktop app is not touched: reopen it.
 - **Open sessions keep the old account.** A running Codex does not watch `auth.json`; the swap
   reaches the next `codex` you start there. The panel warns when one is open (the desktop app counts).

@@ -1774,11 +1774,12 @@ async function checkAsync(name, fn) {
       const b = addCodexAccount('acct-b');
       writeLive(t, codexAuth.toTokens(a.oauth));
       const calls = [];
-      codexTargets.restartAppServers = (tg) => { calls.push(tg.id); return { restarted: [111, 222], desktop: true }; };
+      codexTargets.restartAppServers = (tg) => { calls.push(tg.id); return { restarted: [111, 222], desktop: true, daemon: true }; };
       const r = await codexSwap.swapTo(b.id, t);
       assert.deepStrictEqual(calls, [t.id], 'restarted once, on the swapped target');
       assert.ok(r.warnings.some((w) => /Reiniciados 2/.test(w)), r.warnings.join(' | '));
       assert.ok(r.warnings.some((w) => /app de escritorio/.test(w)), r.warnings.join(' | '));
+      assert.ok(r.warnings.some((w) => /demonio/.test(w)), r.warnings.join(' | '));
       await codexSwap.swapTo(b.id, t);
       assert.deepStrictEqual(calls, [t.id], 'swapping to the account already live there restarts nothing');
     });
