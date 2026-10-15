@@ -17,7 +17,6 @@ const auto = require('./lib/auto');
 // Codex lives in its own package, with its own store: nothing below this line ever sees it.
 const codexRoutes = require('./lib/codex/routes');
 const codexSwap = require('./lib/codex/swap');
-const codexTargets = require('./lib/codex/targets');
 
 // The host the BROWSER uses, and the only one the Host-header allowlist accepts. Kept separate
 // from the bind address on purpose: a container has to listen on all of its own interfaces to be
@@ -557,13 +556,6 @@ function listen(port) {
     setInterval(keepAliveTick, KEEPALIVE_EVERY_MS).unref();
     codexKeepAlive();
     setInterval(codexKeepAlive, KEEPALIVE_EVERY_MS).unref();
-    // A Codex swap leaves the restart of the long-lived Codex processes pending until no agent is
-    // working (lib/codex/targets.js); this is what carries it out.
-    setInterval(() => {
-      for (const r of codexTargets.restartTick()) {
-        if (r.restarted && r.restarted.length) console.log(`  Codex: ${r.restarted.length} proceso(s) reiniciados con la cuenta nueva (${r.id})`);
-      }
-    }, 10 * 1000).unref();
 
     // Auto-rotation monitor. Cheap when idle (reads the active account's cached usage);
     // only swaps when it has genuinely crossed the threshold. Off unless the user enabled it.

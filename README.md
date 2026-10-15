@@ -205,12 +205,8 @@ Codex's own limits, and the panel's:
 - **Never log out of Codex to switch accounts.** Codex's logout revokes that account's tokens at
   OpenAI, so the copy the panel holds dies with it - the row then says "revoked" and the account has
   to be added again. Add accounts with **add account** and switch with **swap**; neither logs anything out.
-- **Open Codex sessions follow the swap, without being cut.** Codex reads `auth.json` only when it starts,
-  and Paseo keeps one `codex app-server` per agent. After a swap the panel waits until no Codex agent is
-  working (it reads each agent's status from `~/.paseo/agents`), then stops the CLI's `codex app-server`
-  processes and restarts the managed daemon terminal `codex` sessions use. Paseo starts a fresh
-  app-server on each agent's next message, on the new account, and an idle agent shows no error. The
-  desktop app is not touched: reopen it.
+- **A swap is a `codex login`.** It writes the session to `auth.json`, and every Codex you start
+  afterwards runs on the new account.
 - **Open sessions keep the old account.** A running Codex does not watch `auth.json`; the swap
   reaches the next `codex` you start there. The panel warns when one is open (the desktop app counts).
 - **Want one account in Windows and WSL at once?** Link the distro's file to the Windows one, once,
@@ -335,7 +331,7 @@ you use fits, an issue naming it and where it stores credentials is the most use
 ## Development
 
 ```bash
-node test.js        # 101 checks, ~13 s, no external network
+node test.js        # 100 checks, ~13 s, no external network
 ```
 
 Every `fetch` is stubbed, so a run never spends the usage endpoint's budget. Each module has its
