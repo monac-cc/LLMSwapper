@@ -1674,7 +1674,7 @@ async function checkAsync(name, fn) {
   const withCodex = async (targetNames, fn, net = stubCodexNet()) => {
     const realFetch = global.fetch;
     const realDetect = codexTargets.detectRunning;
-    const realRestart = codexTargets.restartAppServers;
+    const realRestart = codexTargets.requestRestart;
     const tgs = targetNames.map(codexTarget);
     codexTargetList = tgs;
     fs.rmSync(path.join(SANDBOX, 'codex'), { recursive: true, force: true });
@@ -1687,7 +1687,7 @@ async function checkAsync(name, fn) {
     } finally {
       global.fetch = realFetch;
       codexTargets.detectRunning = realDetect;
-      codexTargets.restartAppServers = realRestart;
+      codexTargets.requestRestart = realRestart;
       codexTargetList = [codexTargets.hostTarget()];
     }
   };
@@ -1766,7 +1766,7 @@ async function checkAsync(name, fn) {
     }, revoked);
   });
 
-  await checkAsync('codex swap: reinicia los codex app-server que siguen con la cuenta anterior (Paseo), y no si la cuenta no cambia', async () => {
+  await checkAsync('codex swap: deja pendiente el reinicio de los codex app-server (Paseo) hasta que no trabaje ninguno, y no si la cuenta no cambia', async () => {
     // Medido: Paseo mantiene un `codex app-server` por agente y Codex solo lee auth.json al arrancar,
     // así que sin esto sus agentes seguían gastando la cuenta anterior durante días.
     await withCodex(['live'], async (t) => {
@@ -1774,14 +1774,18 @@ async function checkAsync(name, fn) {
       const b = addCodexAccount('acct-b');
       writeLive(t, codexAuth.toTokens(a.oauth));
       const calls = [];
-      codexTargets.restartAppServers = (tg) => { calls.push(tg.id); return { restarted: [111, 222], desktop: true, daemon: true }; };
+      codexTargets.requestRestart = (tg) => { calls.push(tg.id); return { id: tg.id, waiting: 2 }; };
       const r = await codexSwap.swapTo(b.id, t);
-      assert.deepStrictEqual(calls, [t.id], 'restarted once, on the swapped target');
-      assert.ok(r.warnings.some((w) => /Reiniciados 2/.test(w)), r.warnings.join(' | '));
-      assert.ok(r.warnings.some((w) => /app de escritorio/.test(w)), r.warnings.join(' | '));
-      assert.ok(r.warnings.some((w) => /demonio/.test(w)), r.warnings.join(' | '));
+      assert.deepStrictEqual(calls, [t.id], 'asked once, on the swapped target');
+      assert.ok(r.warnings.some((w) => /2 agente\(s\)[\s\S]*sin cortarles nada/.test(w)), r.warnings.join(' | '));
       await codexSwap.swapTo(b.id, t);
       assert.deepStrictEqual(calls, [t.id], 'swapping to the account already live there restarts nothing');
+
+      writeLive(t, codexAuth.toTokens(a.oauth));
+      codexTargets.requestRestart = (tg) => { calls.push(tg.id); return { id: tg.id, restarted: [111], desktop: true, daemon: true }; };
+      const idle = await codexSwap.swapTo(b.id, t);
+      assert.ok(idle.warnings.some((w) => /siguiente mensaje/.test(w)), idle.warnings.join(' | '));
+      assert.ok(idle.warnings.some((w) => /app de escritorio/.test(w)), idle.warnings.join(' | '));
     });
   });
 
