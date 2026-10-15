@@ -1674,6 +1674,7 @@ async function checkAsync(name, fn) {
   const withCodex = async (targetNames, fn, net = stubCodexNet()) => {
     const realFetch = global.fetch;
     const realDetect = codexTargets.detectRunning;
+    const realRestart = codexTargets.restartAppServers;
     const tgs = targetNames.map(codexTarget);
     codexTargetList = tgs;
     fs.rmSync(path.join(SANDBOX, 'codex'), { recursive: true, force: true });
@@ -1686,6 +1687,7 @@ async function checkAsync(name, fn) {
     } finally {
       global.fetch = realFetch;
       codexTargets.detectRunning = realDetect;
+      codexTargets.restartAppServers = realRestart;
       codexTargetList = [codexTargets.hostTarget()];
     }
   };
@@ -1764,6 +1766,24 @@ async function checkAsync(name, fn) {
     }, revoked);
   });
 
+  await checkAsync('codex swap: reinicia los codex app-server que siguen con la cuenta anterior (Paseo), y no si la cuenta no cambia', async () => {
+    // Medido: Paseo mantiene un `codex app-server` por agente y Codex solo lee auth.json al arrancar,
+    // así que sin esto sus agentes seguían gastando la cuenta anterior durante días.
+    await withCodex(['live'], async (t) => {
+      const a = addCodexAccount('acct-a');
+      const b = addCodexAccount('acct-b');
+      writeLive(t, codexAuth.toTokens(a.oauth));
+      const calls = [];
+      codexTargets.restartAppServers = (tg) => { calls.push(tg.id); return { restarted: [111, 222], desktop: true }; };
+      const r = await codexSwap.swapTo(b.id, t);
+      assert.deepStrictEqual(calls, [t.id], 'restarted once, on the swapped target');
+      assert.ok(r.warnings.some((w) => /Reiniciados 2/.test(w)), r.warnings.join(' | '));
+      assert.ok(r.warnings.some((w) => /app de escritorio/.test(w)), r.warnings.join(' | '));
+      await codexSwap.swapTo(b.id, t);
+      assert.deepStrictEqual(calls, [t.id], 'swapping to the account already live there restarts nothing');
+    });
+  });
+
   await checkAsync('codex swap: con Codex abierto avisa, y el store se queda el par rotado de la cuenta saliente', async () => {
     await withCodex(['live'], async (t) => {
       const a = addCodexAccount('acct-a');
@@ -1774,7 +1794,7 @@ async function checkAsync(name, fn) {
       codexTargets.detectRunning = () => ({ running: true, pids: [4242] });
       const r = await codexSwap.swapTo(b.id, t);
       assert.strictEqual(r.ok, true, 'an open Codex never blocks the swap');
-      assert.ok(r.warnings.some((w) => /abierto/.test(w) && /NUEVAS/.test(w)), r.warnings.join(' | '));
+      assert.ok(r.warnings.some((w) => /abierto/.test(w) && /reinicie/.test(w)), r.warnings.join(' | '));
       assert.strictEqual(codexStore.get(a.id).oauth.refreshToken, rotated.refresh_token, 'outgoing pair adopted');
       assert.strictEqual(codexStore.get(a.id).oauth.accessToken, rotated.access_token);
     });
