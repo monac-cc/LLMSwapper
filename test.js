@@ -22,7 +22,7 @@ function check(name, fn) {
 console.log('\nLLMSwapper self-check\n');
 
 for (const mod of ['lib/paths.js', 'lib/store.js', 'lib/usage.js', 'lib/swap.js', 'lib/credentials.js', 'lib/targets.js', 'lib/terminal.js', 'lib/auto.js',
-  'lib/codex/auth.js', 'lib/codex/store.js', 'lib/codex/targets.js', 'lib/codex/usage.js', 'lib/codex/swap.js', 'lib/codex/routes.js']) {
+  'lib/codex/auth.js', 'lib/codex/store.js', 'lib/codex/targets.js', 'lib/codex/usage.js', 'lib/codex/swap.js', 'lib/codex/routes.js', 'lib/codex/paseo.js']) {
   check(`${mod} module self-check`, () => {
     execFileSync(process.execPath, [path.join(__dirname, mod)], { stdio: 'pipe', timeout: 30000 });
   });
@@ -1706,6 +1706,9 @@ async function checkAsync(name, fn) {
   const withCodex = async (targetNames, fn, net = stubCodexNet()) => {
     const realFetch = global.fetch;
     const realDetect = codexTargets.detectRunning;
+    const codexPaseo = require('./lib/codex/paseo');
+    const realAfterSwap = codexPaseo.afterSwap;
+    codexPaseo.afterSwap = async () => ({ paseo: false, reloading: 0, waiting: 0 });
     const tgs = targetNames.map(codexTarget);
     codexTargetList = tgs;
     fs.rmSync(path.join(SANDBOX, 'codex'), { recursive: true, force: true });
@@ -1718,6 +1721,7 @@ async function checkAsync(name, fn) {
     } finally {
       global.fetch = realFetch;
       codexTargets.detectRunning = realDetect;
+      codexPaseo.afterSwap = realAfterSwap;
       codexTargetList = [codexTargets.hostTarget()];
     }
   };
