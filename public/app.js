@@ -3,11 +3,11 @@
 // The usage endpoint allows roughly 5 requests per 5 minutes for the WHOLE app. What actually
 // bounds our request rate is the server-side floor (MIN_GAP_MS, 80s between ANY two outbound
 // calls), NOT this interval - a poll that arrives sooner than the floor is just served cache or a
-// "queued" marker, never another request. So polling every 5 minutes is safe: it asks the server
+// "queued" marker, never another request. So polling every minute is safe: it asks the server
 // for fresh numbers more often, and the server hands back what the floor lets it fetch. Reading
 // usage costs no tokens and does not touch the 5h/weekly quota, so there is nothing to save by
 // polling less. Refresh (the button) forces past the cache; the background poll does not.
-const POLL_MS = 5 * 60 * 1000;
+const POLL_MS = 60 * 1000;
 
 /* ---------------- idioma ----------------
  *
@@ -131,6 +131,7 @@ const I18N = {
     'codex.login.text': 'Termina el login en el navegador y pulsa importar.',
     'codex.login.submit': 'importar',
     'codex.toast.loginOpened': 'Terminal abierta ({how}). Termina el login en el navegador y pulsa importar.',
+    'codex.noSession': 'OpenAI no le aplica límite de 5 h ahora',
     'codex.toast.loginDevice': 'Terminal abierta ({how}). Windows tiene reservado el puerto del login por navegador, así que usa el código: abre el enlace que muestra, escribe el código, y luego pulsa importar.',
     'codex.toast.imported': 'Cuenta de Codex importada: {name}',
   },
@@ -243,6 +244,7 @@ const I18N = {
     'codex.login.text': 'Finish the login in the browser, then press import.',
     'codex.login.submit': 'import',
     'codex.toast.loginOpened': 'Terminal opened ({how}). Finish the login in the browser, then press import.',
+    'codex.noSession': 'OpenAI applies no 5-hour limit to it right now',
     'codex.toast.loginDevice': 'Terminal opened ({how}). Windows reserves the browser login\'s port, so use the code: open the link it shows, type the code, then press import.',
     'codex.toast.imported': 'Codex account imported: {name}',
   },
@@ -524,6 +526,10 @@ function buildRow(account, target) {
   const scoped = usable ? (usable.scoped || []).map((s) => `${s.label} ${s.percent}%`).join(' · ') : '';
   fillMeter($('.meter[data-kind="session"]', node), usable && usable.session);
   fillMeter($('.meter[data-kind="weekly"]', node), usable && usable.weekly, scoped);
+  // OpenAI can report the weekly window alone: then there is no 5-hour limit, not a missing reading.
+  if (provider === 'codex' && usable && !usable.session && usable.weekly) {
+    $('.meter[data-kind="session"] .resets', node).textContent = t('codex.noSession');
+  }
 
   // An error outranks a warning; between two of a kind, the session's end is the one to act on.
   const sNote = sessionNote(account);

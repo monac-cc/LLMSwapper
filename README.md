@@ -130,7 +130,7 @@ Adding the same account twice updates it in place.
 
 ## Usage meters
 
-Refreshed every 5 minutes and on demand. Where the numbers come from, and what they cost:
+The panel asks every minute and on demand; how fresh each reading really is depends on its source. Where the numbers come from, and what they cost:
 
 | Account | Source | Cost per reading |
 |---|---|---|
@@ -194,8 +194,9 @@ Codex is installed and has run there. Swapping writes that distro's `auth.json`,
 signed in to on Windows works inside WSL with no second login.
 
 **Meters** read `chatgpt.com/backend-api/wham/usage`, the endpoint Codex's own `/status` reads: the
-5-hour and weekly windows, **0 tokens** per reading. Refreshed with the Claude ones' rhythm - every 5
-minutes and on demand, a 4-minute cache, the last reading marked stale when chatgpt.com rate-limits.
+5-hour and weekly windows, **0 tokens** per reading, at most a minute old. When OpenAI reports only the
+weekly window, the 5-hour meter says there is no 5-hour limit rather than showing a blank. A 429 backs
+off for 10 minutes and keeps the last reading, marked stale.
 An account whose sign-in OpenAI has revoked shows "sign in again": **add account**, log in with it,
 **import**.
 
