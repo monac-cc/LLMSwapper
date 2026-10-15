@@ -132,6 +132,7 @@ const I18N = {
     'codex.login.submit': 'importar',
     'codex.toast.loginOpened': 'Terminal abierta ({how}). Termina el login en el navegador y pulsa importar.',
     'codex.noSession': 'OpenAI no le aplica límite de 5 h ahora',
+    'codex.activeIn': 'En uso en {env}. Una cuenta de Codex solo puede estar en un entorno: cambia {env} a otra cuenta para traerla aquí.',
     'codex.toast.loginDevice': 'Terminal abierta ({how}). Windows tiene reservado el puerto del login por navegador, así que usa el código: abre el enlace que muestra, escribe el código, y luego pulsa importar.',
     'codex.toast.imported': 'Cuenta de Codex importada: {name}',
   },
@@ -245,6 +246,7 @@ const I18N = {
     'codex.login.submit': 'import',
     'codex.toast.loginOpened': 'Terminal opened ({how}). Finish the login in the browser, then press import.',
     'codex.noSession': 'OpenAI applies no 5-hour limit to it right now',
+    'codex.activeIn': 'In use in {env}. A Codex account can be in one environment only: switch {env} to another account to bring it here.',
     'codex.toast.loginDevice': 'Terminal opened ({how}). Windows reserves the browser login\'s port, so use the code: open the link it shows, type the code, then press import.',
     'codex.toast.imported': 'Codex account imported: {name}',
   },
@@ -531,8 +533,11 @@ function buildRow(account, target) {
     $('.meter[data-kind="session"] .resets', node).textContent = t('codex.noSession');
   }
 
+  // Codex: one environment per account (lib/codex/swap.js). Said here, before a click is refused.
+  const elsewhere = (account.activeIn || []).map((id) => (targetList.find((x) => x.id === id) || {}).label || id.replace(/^wsl:/, ''));
+  const eNote = elsewhere.length && !isActive ? { tone: 'warn', text: t('codex.activeIn', { env: elsewhere.join(', ') }) } : null;
   // An error outranks a warning; between two of a kind, the session's end is the one to act on.
-  const sNote = sessionNote(account);
+  const sNote = sessionNote(account) || eNote;
   const uNote = noteFor(usage);
   const note = (sNote && sNote.tone === 'error') ? sNote : (uNote && uNote.tone === 'error') ? uNote : (sNote || uNote);
   if (sNote && sNote.tone === 'error') node.classList.add('is-error');
@@ -547,8 +552,9 @@ function buildRow(account, target) {
   if (isActive) {
     swapBtn.remove();
   } else {
-    swapBtn.disabled = swapping;
-    swapBtn.title = t('swap.title', { name: account.label, env: target.label });
+    if (eNote) swapBtn.dataset.blocked = '1';
+    swapBtn.disabled = swapping || !!eNote;
+    swapBtn.title = eNote ? eNote.text : t('swap.title', { name: account.label, env: target.label });
     swapBtn.addEventListener('click', () => doSwap(account.id, target.id, swapBtn));
   }
   const renameBtn = $('.btn-rename', node);
@@ -868,7 +874,7 @@ async function doSwap(id, targetId, button) {
     row.classList.remove('is-busy');
     button.classList.remove('is-loading');
     swapping = false;
-    $$('.btn-swap').forEach((b) => { b.disabled = false; });
+    $$('.btn-swap').forEach((b) => { b.disabled = !!b.dataset.blocked; });
   }
 }
 
