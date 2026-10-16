@@ -208,8 +208,10 @@ Codex's own limits, and the panel's:
 - **A swap is a `codex login`, and open Paseo sessions follow it.** It writes the session to
   `auth.json`, so every Codex you start afterwards runs on the new account. If Paseo is installed, its
   open Codex agents are reloaded with `paseo agent reload`, which resumes the same conversation on the
-  new account: idle ones at once (the one that ran out of quota included), one still answering as soon
-  as that answer ends. Nothing is cut. A Codex opened elsewhere keeps its account until restarted.
+  new account: idle ones at once (the one that ran out of quota included); one still working gets 30
+  seconds to finish its answer, and past that Paseo stops it cleanly, reloads it and the panel tells it
+  to continue, so an agent that never stops (goal mode) switches too. A Codex opened elsewhere keeps its
+  account until restarted.
 - **Open sessions keep the old account.** A running Codex does not watch `auth.json`; the swap
   reaches the next `codex` you start there. The panel warns when one is open (the desktop app counts).
 - **Want one account in Windows and WSL at once?** Link the distro's file to the Windows one, once,
