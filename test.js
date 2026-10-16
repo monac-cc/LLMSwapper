@@ -1820,6 +1820,24 @@ async function checkAsync(name, fn) {
     });
   });
 
+  await checkAsync('codex swap: el servidor en segundo plano toma la cuenta al momento, y una al límite se avisa', async () => {
+    const locked = async (url) => {
+      if (String(url) !== codexUsage.USAGE_URL) throw new Error(`unexpected call to ${url}`);
+      return res(200, { plan_type: 'plus', rate_limit: { allowed: false, limit_reached: true, primary_window: { ...FIVE_H, used_percent: 100 }, secondary_window: WEEK } });
+    };
+    await withCodex(['host'], async (t) => {
+      const host = { ...t, id: 'host', kind: 'host' };
+      codexTargetList = [host];
+      require('./lib/codex/daemon').afterSwap = async () => ({ state: 'switched' });
+      codexTargets.detectRunning = () => ({ running: true, pids: [4242] });
+      const a = addCodexAccount('acct-a');
+      const r = await codexSwap.swapTo(a.id, host);
+      assert.ok(r.warnings.some((w) => /terminal usa ya/.test(w)), r.warnings.join(' | '));
+      assert.ok(!r.warnings.some((w) => /reinicie/.test(w)), 'sessions that already switched are not told to restart');
+      assert.ok(r.warnings.some((w) => /al límite de uso hasta el/.test(w)), r.warnings.join(' | '));
+    }, locked);
+  });
+
   await checkAsync('codex swap: una sesión viva que el store no conoce se importa antes de sobrescribirla', async () => {
     await withCodex(['unknown'], async (t) => {
       const b = addCodexAccount('acct-b');

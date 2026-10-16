@@ -210,12 +210,17 @@ Codex's own limits, and the panel's:
   open Codex agents are reloaded with `paseo agent reload`, which resumes the same conversation on the
   new account: idle ones at once (the one that ran out of quota included). One still working is never
   stopped: it goes on with its account and switches the moment it stops by itself, so your next
-  message runs on the new one. Terminal `codex` sessions run against Codex's shared background
-  server, which also keeps the account it started with: the panel checks it through `codex app-server
-  proxy` and, as soon as no thread in it is answering, restarts it with Codex's own `codex app-server
-  daemon restart`; the sessions reconnect on their own, on the new account.
-- **Open sessions keep the old account.** A running Codex does not watch `auth.json`; the swap
-  reaches the next `codex` you start there. The panel warns when one is open (the desktop app counts).
+  message runs on the new one.
+- **Terminal `codex` sessions switch at once, mid-answer included.** They run against Codex's shared
+  background server (`/status` says "Local background server"), which never re-reads `auth.json`. The
+  panel logs that server in with the new account itself, through `codex app-server proxy`, the way
+  Codex's host apps do (`account/login/start` with the access token, kept in the server's memory):
+  the request in flight finishes on the old account and the next one goes out on the new. Nothing is
+  restarted. Codex does not renew a login handed over like that, so the panel feeds the server every
+  newer token that lands in `auth.json`, and renews it itself a day before it expires.
+- **What runs outside that server keeps the old account.** The desktop app, `codex exec` or a Codex
+  in WSL read `auth.json` when they started; the swap reaches the next one you start. The panel warns
+  when one is open.
 - **Want one account in Windows and WSL at once?** Link the distro's file to the Windows one, once,
   inside the distro: `ln -sf /mnt/c/Users/<you>/.codex/auth.json ~/.codex/auth.json`. Then there is a
   single file, Codex coordinates its refreshes through it (verified: it writes through the link), the
@@ -338,7 +343,7 @@ you use fits, an issue naming it and where it stores credentials is the most use
 ## Development
 
 ```bash
-node test.js        # 102 checks, ~13 s, no external network
+node test.js        # 103 checks, ~13 s, no external network
 ```
 
 Every `fetch` is stubbed, so a run never spends the usage endpoint's budget. Each module has its

@@ -560,7 +560,7 @@ function listen(port) {
     setInterval(codexKeepAlive, KEEPALIVE_EVERY_MS).unref();
     // Paseo agents that were answering during a Codex swap are reloaded as soon as they finish.
     setInterval(() => void codexPaseo.tick().catch(() => undefined), 5000).unref();
-    // And the background server terminal sessions use, once nothing in it is answering.
+    // The background server terminal sessions use follows auth.json: account and renewed tokens.
     setInterval(() => void codexDaemon.tick().catch(() => undefined), 5000).unref();
 
     // Auto-rotation monitor. Cheap when idle (reads the active account's cached usage);

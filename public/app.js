@@ -116,7 +116,8 @@ const I18N = {
     'codex.dir.label': 'Importar desde otra carpeta CODEX_HOME',
     'codex.dir.prefix': 'CODEX_HOME',
     'codex.dir.help': 'Una carpeta en la que ejecutaste <code>CODEX_HOME=… codex login</code>. Tu sesión activa no se toca.',
-    'codex.tab.running': 'Codex está abierto en {name}: lo que abras ahora usa la cuenta nueva; lo que ya estaba abierto sigue con la anterior hasta que lo reinicies, igual que tras un codex login',
+    'codex.tab.running': 'Codex está abierto en {name}: las sesiones de terminal pasan a la cuenta nueva al momento, sin cortarse; lo que corre aparte (la app de escritorio, codex exec) sigue con la anterior hasta que lo reinicies',
+    'codex.tab.runningWsl': 'Codex está abierto en {name}: lo que abras ahora usa la cuenta nueva; lo que ya estaba abierto sigue con la anterior hasta que lo reinicies, igual que tras un codex login',
     'codex.empty.title': '0 cuentas de Codex registradas',
     'codex.empty.step1': 'Pulsa <strong>añadir cuenta</strong>: se abre una terminal con <code>codex login</code> en una carpeta aparte.',
     'codex.empty.step2': 'Termina el login en el navegador.',
@@ -231,7 +232,8 @@ const I18N = {
     'codex.dir.label': 'Import from another CODEX_HOME directory',
     'codex.dir.prefix': 'CODEX_HOME',
     'codex.dir.help': 'A directory where you ran <code>CODEX_HOME=… codex login</code>. Your active session is left alone.',
-    'codex.tab.running': 'Codex is running in {name}: whatever you start now uses the new account; what was already open keeps the old one until restarted, as after a codex login',
+    'codex.tab.running': 'Codex is running in {name}: terminal sessions move to the new account at once, without being cut; what runs apart (the desktop app, codex exec) keeps the old one until restarted',
+    'codex.tab.runningWsl': 'Codex is running in {name}: whatever you start now uses the new account; what was already open keeps the old one until restarted, as after a codex login',
     'codex.empty.title': 'No Codex accounts yet',
     'codex.empty.step1': 'Press <strong>add account</strong>: a terminal opens running <code>codex login</code> in a separate directory.',
     'codex.empty.step2': 'Finish the login in the browser.',
@@ -669,7 +671,7 @@ function buildTabs() {
       dot.className = 'tab-run';
       dot.setAttribute('aria-hidden', 'true');
       tab.append(dot);
-      tab.title = t('tab.running', { name: target.label });
+      tab.title = t(provider === 'codex' && target.kind !== 'host' ? 'tab.runningWsl' : 'tab.running', { name: target.label });
     }
 
     tab.addEventListener('click', () => selectTarget(target.id));
