@@ -401,6 +401,13 @@ check('el store adopta el par que Claude Code rotó por su cuenta, y solo si sab
       fs.statSync = realStat;
     }
     assert.strictEqual(store.get(account.id).oauth.refreshToken, 'R-NUEVO', 'el par guardado no se toca');
+
+    // Un par vivo MÁS VIEJO que el guardado (una renovación cuya escritura en el fichero falló) no
+    // se adopta: su refresh token es el muerto. Se cura el fichero con el par del store.
+    P.writeJsonAtomic(P.credentialsPath(), { claudeAiOauth: { accessToken: 'VIEJO-2', refreshToken: 'R-MUERTO', expiresAt: 1, scopes: [] } }, 0o600);
+    assert.strictEqual(swapLib.adoptLiveTokens(store), null, 'un par más viejo no se adopta');
+    assert.strictEqual(store.get(account.id).oauth.refreshToken, 'R-NUEVO', 'el par guardado sigue');
+    assert.strictEqual(JSON.parse(fs.readFileSync(P.credentialsPath(), 'utf8')).claudeAiOauth.refreshToken, 'R-NUEVO', 'y el fichero lo recupera');
   } finally {
     if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
     else process.env.CLAUDE_CONFIG_DIR = previous;
@@ -790,6 +797,19 @@ async function checkAsync(name, fn) {
       assert.deepStrictEqual(store.publicView('host').accounts.find((a) => a.id === imported.id).activeIn, ['wsl:Ubuntu'], 'the row says where, before the click');
       store.setActive(pasted.id, 'wsl:Ubuntu');
       assert.deepStrictEqual(store.publicView('host').accounts.find((a) => a.id === pasted.id).activeIn, [], 'a year-long token is never held back');
+
+      // Ubuntu stops: it drops off the list, and still holds its copy on disk. Still refused.
+      store.setActive(imported.id, 'wsl:Ubuntu');
+      claudeTargets.list = () => [win];
+      await assert.rejects(swapLib.swapTo(imported.id, { store, oauth: {}, usage: {} }, win),
+        (err) => err.status === 409 && /Ubuntu \(parada/.test(err.message), 'a stopped distro still holds it');
+      assert.ok(!fs.existsSync(win.credentialsPath), 'refused before anything was written');
+
+      // A renewal reaches a WSL copy that still holds the old pair, and only such a copy.
+      fs.writeFileSync(ubuntu.credentialsPath, JSON.stringify({ claudeAiOauth: { accessToken: 'A1', refreshToken: 'R1', expiresAt: 1 } }));
+      assert.strictEqual(swapLib.syncLiveCredentials('R1', { accessToken: 'A2', refreshToken: 'R2', expiresAt: 2 }, ubuntu), true);
+      assert.strictEqual(JSON.parse(fs.readFileSync(ubuntu.credentialsPath, 'utf8')).claudeAiOauth.refreshToken, 'R2');
+      assert.strictEqual(swapLib.syncLiveCredentials('R1', { accessToken: 'A3', refreshToken: 'R3', expiresAt: 3 }, ubuntu), false, 'not a copy of the old pair: left alone');
     } finally {
       claudeTargets.list = realList;
       store.remove(imported.id);

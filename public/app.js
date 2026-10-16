@@ -652,7 +652,7 @@ async function rescanTargets(button) {
  * section title saying the change lands on new sessions; as a permanent label it was noise, and
  * the swap already says exactly that, once, in the toast that follows it.
  */
-function buildTabs() {
+function buildTabs(shownId) {
   const bar = $('#tabs');
   bar.innerHTML = '';
   bar.hidden = false;
@@ -663,7 +663,7 @@ function buildTabs() {
     tab.className = 'tab';
     tab.setAttribute('role', 'tab');
     tab.dataset.target = target.id;
-    tab.setAttribute('aria-selected', String(target.id === selectedTarget));
+    tab.setAttribute('aria-selected', String(target.id === shownId));
     tab.textContent = target.label;
 
     if (target.running) {
@@ -719,13 +719,13 @@ function render() {
   envsEl.innerHTML = '';
 
   // A remembered distro can disappear between reloads; falling back keeps the panel usable
-  // instead of rendering nothing at all.
+  // instead of rendering nothing at all. The choice itself is kept, not overwritten: a distro
+  // missing from one poll (stopped, or a slow scan) comes back on screen with the next.
   const target = targetList.find((t) => t.id === selectedTarget) || targetList[0];
   // Per environment: a WSL distro can use the keyring while the host does not, and the other way round.
   $('#banner-keyring').hidden = provider !== 'codex' || !target.storeMode || target.storeMode === 'file';
   if (has) {
-    selectedTarget = target.id;
-    buildTabs();
+    buildTabs(target.id);
     envsEl.append(buildSection(target));
   } else {
     $('#tabs').hidden = true;
@@ -961,10 +961,16 @@ function scheduleQueuedRetry() {
   queuedRetry = setTimeout(() => { if (!swapping) refresh(false); }, (Math.min(...waits) + 2) * 1000);
 }
 
+// The newest refresh wins: an older one still sweeping usage (the poll, started just before a
+// swap) would otherwise land after the swap's own and paint the previous account as in use.
+let refreshSeq = 0;
+
 async function refresh(force = false) {
   // Captured before any await: if the provider is switched while this is in flight, what comes
   // back belongs to a view that is no longer on screen and must not be rendered into the new one.
   const p = provider;
+  const seq = ++refreshSeq;
+  const stale = () => provider !== p || seq !== refreshSeq;
   const base = API();
   const btn = $('#btn-refresh');
   btn.disabled = true;
@@ -978,7 +984,7 @@ async function refresh(force = false) {
     // own active from targetList, so the target of this call does not matter.
     const data = await api(`${base}/accounts?target=host`);
     const usage = data.accounts.length ? await api(`${base}/usage/all${force ? '?force=1' : ''}`) : {};
-    if (provider !== p) return;
+    if (stale()) return;
 
     targetList = (res && Array.isArray(res.targets) && res.targets.length) ? res.targets : HOST_ONLY();
     accounts = data.accounts;
@@ -990,13 +996,13 @@ async function refresh(force = false) {
     render();
     reportEnvironment();
   } catch (err) {
-    if (provider !== p) return;
+    if (stale()) return;
     $('#banner-offline').hidden = false;
     envsEl.setAttribute('aria-busy', 'false');
     console.error(err);
   } finally {
-    // After a switch the new provider's refresh owns the button; leave it to that one.
-    if (provider === p) {
+    // After a switch, or behind a newer refresh, the newer one owns the button.
+    if (!stale()) {
       btn.disabled = false;
       btn.classList.remove('is-loading');
     }

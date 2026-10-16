@@ -214,7 +214,8 @@ async function handleApi(req, res, url, port) {
         id: t.id,
         kind: t.kind,
         label: t.label,
-        activeId: store.activeFor(t.id) || swap.detectActiveId(t.id, store),
+        // What is live first: a `claude /login` outside the panel moves it without telling the store.
+        activeId: swap.detectActiveId(t.id, store) || store.activeFor(t.id),
         running: targets.detectRunning(t).running,
       })),
     });
@@ -223,12 +224,10 @@ async function handleApi(req, res, url, port) {
   if (pathname === '/api/accounts' && method === 'GET') {
     const targetId = url.searchParams.get('target') || 'host';
     const view = store.publicView(targetId);
-    // If we have never swapped on this target, show its REAL current account as in-use by
-    // reading that environment's live config. A display hint only; nothing is written.
-    if (!view.activeId) {
-      const det = swap.detectActiveId(targetId, store);
-      if (det) { view.activeId = det; for (const a of view.accounts) a.isActive = a.id === det; }
-    }
+    // The account REALLY live in that environment, read from its config, wins over the store's
+    // record: never swapped there, or moved by a `claude /login` outside the panel. Nothing is written.
+    const det = swap.detectActiveId(targetId, store);
+    if (det && det !== view.activeId) { view.activeId = det; for (const a of view.accounts) a.isActive = a.id === det; }
     return send(res, 200, view);
   }
 
@@ -429,18 +428,25 @@ const REFRESH_WHEN_UNDER_MS = 24 * 60 * 60 * 1000; // renew if under a day of li
 const AUTO_EVERY_MS = 3 * 60 * 1000;
 
 async function keepTokensAlive() {
-  // First, pick up a rotation Claude Code performed on its own. Renewing with a token it
-  // already replaced would fail with invalid_grant and strand the account behind a login.
-  const healed = swap.adoptLiveTokens(store);
-  if (healed) {
-    const who = (store.get(healed) || {}).email || healed;
-    console.log(`  sesión viva adoptada: ${who} (Claude Code había rotado su token)`);
+  // First, pick up a rotation Claude Code performed on its own, in every environment. Renewing
+  // with a token it already replaced would fail with invalid_grant and strand the account.
+  const listed = targets.list();
+  for (const t of listed) {
+    const healed = swap.adoptLiveTokens(store, t);
+    if (healed) {
+      const who = (store.get(healed) || {}).email || healed;
+      console.log(`  sesión viva adoptada: ${who}${t.kind === 'host' ? '' : ` en ${t.label}`} (Claude Code había rotado su token)`);
+    }
   }
+  const active = store.load().active || {};
   for (const account of store.list()) {
     const o = account.oauth;
     if (!o || !o.refreshToken) continue;
     const life = (o.expiresAt || 0) - Date.now();
     if (life > REFRESH_WHEN_UNDER_MS) continue;
+    // Live in a distro that is stopped: its copy there cannot be updated, and renewing would kill
+    // it. Its own Claude Code renews it when it runs, and the adoption above picks that up.
+    if (Object.entries(active).some(([t, v]) => v === account.id && !listed.some((x) => x.id === t))) continue;
     if (store.sessionOver(account)) {
       // Renewing never extends a login (store.sessionOver), and past its end Anthropic only answers
       // invalid_grant. Say so plainly instead of calling it again every 6 hours.
@@ -455,8 +461,11 @@ async function keepTokensAlive() {
       // account's session to update, and writes through the credentials BACKEND - on
       // macOS that is the Keychain, and a path-based write would land in a file Claude
       // Code never reads, leaving it with the dead token for real.
-      const synced = swap.syncLiveCredentials(o.refreshToken, fresh);
-      console.log(`  token renovado: ${account.email}${synced ? ' (y sincronizado con Claude Code)' : ''}`);
+      // Every environment still holding the old pair gets the new one, the WSL distros included:
+      // the refresh just killed their refresh token too.
+      // A write that fails here is healed by the next adoption, which hands the file the newer pair.
+      const synced = listed.filter((t) => { try { return swap.syncLiveCredentials(o.refreshToken, fresh, t.kind === 'host' ? null : t); } catch { return false; } });
+      console.log(`  token renovado: ${account.email}${synced.length ? ` (y sincronizado con Claude Code en ${synced.map((t) => t.label).join(', ')})` : ''}`);
     } catch (err) {
       // Do not delete anything - a transient network failure must not cost an account.
       // invalid_grant is the one case that is not transient and that the user can act on:
@@ -561,7 +570,7 @@ function listen(port) {
     // Paseo agents that were answering during a Codex swap are reloaded as soon as they finish.
     setInterval(() => void codexPaseo.tick().catch(() => undefined), 5000).unref();
     // The background server terminal sessions use follows auth.json: account and renewed tokens.
-    setInterval(() => void codexDaemon.tick().catch(() => undefined), 5000).unref();
+    setInterval(() => { if (!codexSwap.swapping()) void codexDaemon.tick().catch(() => undefined); }, 5000).unref();
 
     // Auto-rotation monitor. Cheap when idle (reads the active account's cached usage);
     // only swaps when it has genuinely crossed the threshold. Off unless the user enabled it.

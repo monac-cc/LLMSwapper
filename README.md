@@ -217,10 +217,12 @@ Codex's own limits, and the panel's:
   Codex's host apps do (`account/login/start` with the access token, kept in the server's memory):
   the request in flight finishes on the old account and the next one goes out on the new. Nothing is
   restarted. Codex does not renew a login handed over like that, so the panel feeds the server every
-  newer token that lands in `auth.json`, and renews it itself a day before it expires.
+  newer token that lands in `auth.json`, and renews it itself a day before it expires. A server that
+  does not answer is tried again in 30 seconds. A WSL distro linked to the Windows `auth.json` (below)
+  gets the same for its own background server, while the distro is running.
 - **What runs outside that server keeps the old account.** The desktop app, `codex exec` or a Codex
-  in WSL read `auth.json` when they started; the swap reaches the next one you start. The panel warns
-  when one is open.
+  in an unlinked WSL distro read `auth.json` when they started; the swap reaches the next one you
+  start. The panel says so after the swap.
 - **Want one account in Windows and WSL at once?** Link the distro's file to the Windows one, once,
   inside the distro: `ln -sf /mnt/c/Users/<you>/.codex/auth.json ~/.codex/auth.json`. Then there is a
   single file, Codex coordinates its refreshes through it (verified: it writes through the link), the
