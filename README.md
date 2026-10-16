@@ -210,7 +210,10 @@ Codex's own limits, and the panel's:
   open Codex agents are reloaded with `paseo agent reload`, which resumes the same conversation on the
   new account: idle ones at once (the one that ran out of quota included). One still working is never
   stopped: it goes on with its account and switches the moment it stops by itself, so your next
-  message runs on the new one. A Codex opened elsewhere keeps its account until restarted.
+  message runs on the new one. Terminal `codex` sessions run against Codex's shared background
+  server, which also keeps the account it started with: the panel checks it through `codex app-server
+  proxy` and, as soon as no thread in it is answering, restarts it with Codex's own `codex app-server
+  daemon restart`; the sessions reconnect on their own, on the new account.
 - **Open sessions keep the old account.** A running Codex does not watch `auth.json`; the swap
   reaches the next `codex` you start there. The panel warns when one is open (the desktop app counts).
 - **Want one account in Windows and WSL at once?** Link the distro's file to the Windows one, once,
@@ -335,7 +338,7 @@ you use fits, an issue naming it and where it stores credentials is the most use
 ## Development
 
 ```bash
-node test.js        # 101 checks, ~13 s, no external network
+node test.js        # 102 checks, ~13 s, no external network
 ```
 
 Every `fetch` is stubbed, so a run never spends the usage endpoint's budget. Each module has its

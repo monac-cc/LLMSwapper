@@ -18,6 +18,7 @@ const auto = require('./lib/auto');
 const codexRoutes = require('./lib/codex/routes');
 const codexSwap = require('./lib/codex/swap');
 const codexPaseo = require('./lib/codex/paseo');
+const codexDaemon = require('./lib/codex/daemon');
 
 // The host the BROWSER uses, and the only one the Host-header allowlist accepts. Kept separate
 // from the bind address on purpose: a container has to listen on all of its own interfaces to be
@@ -559,6 +560,8 @@ function listen(port) {
     setInterval(codexKeepAlive, KEEPALIVE_EVERY_MS).unref();
     // Paseo agents that were answering during a Codex swap are reloaded as soon as they finish.
     setInterval(() => void codexPaseo.tick().catch(() => undefined), 5000).unref();
+    // And the background server terminal sessions use, once nothing in it is answering.
+    setInterval(() => void codexDaemon.tick().catch(() => undefined), 5000).unref();
 
     // Auto-rotation monitor. Cheap when idle (reads the active account's cached usage);
     // only swaps when it has genuinely crossed the threshold. Off unless the user enabled it.
