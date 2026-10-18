@@ -106,7 +106,8 @@ if ($busy.Count -gt 0) {
   Write-Host "Tarea '$TaskName' registrada y arrancada."
 }
 Write-Host "  al iniciar sesion: arranca sola, oculta"
-Write-Host "  si cae:            se reinicia (3 intentos, cada 1 min)"
+Write-Host "  si cae:            se reinicia a los 15 s (y queda en el log)"
+Write-Host "  pararlo:           Stop-ScheduledTask -TaskName $TaskName; Stop-Process -Id (Get-NetTCPConnection -LocalPort 7373 -State Listen).OwningProcess"
 Write-Host "  log:               $root\data\server.log"
 Write-Host "  panel:             http://127.0.0.1:7373"
 Write-Host "  quitar:            scripts\install-autostart.ps1 -Uninstall"

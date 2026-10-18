@@ -533,7 +533,8 @@ function listen(port) {
   });
   server.listen(port, BIND, () => {
     const url = `http://${HOST}:${port}`;
-    console.log(`\n  LLMSwapper  ->  ${url}`);
+    // Dated: data\server.log keeps every start, and a crash is only explained by when it happened.
+    console.log(`\n  LLMSwapper  ->  ${url}   (${new Date().toLocaleString('es-ES')})`);
     console.log(`  datos: ${P.dataDir()}`);
     // Inherited from the shell, this silently redirects every read and write to a throwaway
     // config - and the README teaches people to set it for an isolated login.

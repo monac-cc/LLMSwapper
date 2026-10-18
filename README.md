@@ -82,8 +82,10 @@ powershell -ExecutionPolicy Bypass -File scripts\install-autostart.ps1
 ```
 
 Registers a per-user scheduled task (no admin) that launches the panel hidden at logon, restarts
-it up to three times if it crashes (a clean exit, such as the port being busy, is left alone), and
-never kills it on a time limit. It also starts it right away - unless something already listens on
+it 15 seconds after any crash and writes the time and exit code of each one to the log (a clean
+exit, such as the port being busy, is left alone), and never kills it on a time limit. To stop it,
+end the task and the server it leaves running (Task Scheduler does not stop that one):
+`Stop-ScheduledTask LLMSwapper; Stop-Process -Id (Get-NetTCPConnection -LocalPort 7373 -State Listen).OwningProcess`. It also starts it right away - unless something already listens on
 7373, in which case stop that first and run `Start-ScheduledTask LLMSwapper`. Output goes to `data\server.log`. Remove with `-Uninstall`. Don't combine it with running
 `node server.js` by hand - same rule as Docker, one instance only.
 
