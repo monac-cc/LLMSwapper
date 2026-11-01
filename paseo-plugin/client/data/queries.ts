@@ -1,16 +1,20 @@
 import type { PluginHostSummary } from "@getpaseo/plugin/client";
 import { useIsMutating, useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { queuedCount, queuedRepollDelayMs } from "../../shared/markers.ts";
 import type { AutoView, ErrorCode, OpError, OpResult, StateView, SwapView, UsageView } from "../../shared/views.ts";
 import type { SwapInput, Transport } from "./transport.ts";
-import { usageGate } from "./usage-gate.ts";
+import { usageQueue } from "./usage-gate.ts";
 
 export const qk = {
   all: ["llmswapper"] as const,
   state: (serverId: string) => ["llmswapper", "state", serverId] as const,
   usage: (serverId: string) => ["llmswapper", "usage", serverId] as const,
   mutation: (serverId: string) => ["llmswapper", "mutation", serverId] as const,
+  /** Every per-device swap or auto change (not autoAll). */
+  mutations: ["llmswapper", "mutation"] as const,
+  /** The panel's one switch for automatic rotation on several devices. */
+  autoAll: ["llmswapper", "mutation-auto-all"] as const,
 };
 
 export class OpFailure extends Error {
@@ -61,7 +65,9 @@ export function useHostState(t: Transport, h: PluginHostSummary, refreshMs: numb
     staleTime: 60_000,
     gcTime: 30 * 60_000,
     retry: false,                                     // every retry would spawn another remote terminal
-    refetchOnMount: rpc,                              // bridge: remounts (workspace switches) reuse the cache
+    // bridge: remounts (workspace switches) reuse the cache, unless it was invalidated meanwhile (a change that
+    // settled while the card was gone, a device shown again in the panel)
+    refetchOnMount: rpc ? true : (q) => q.state.isInvalidated,
     retryOnMount: rpc,                                // bridge: a failed read with no data waits for Actualizar
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
@@ -70,14 +76,27 @@ export function useHostState(t: Transport, h: PluginHostSummary, refreshMs: numb
   });
 }
 
+/** A hidden device is not read: its usage read still waiting in the gate is dropped. One already running finishes. */
+export async function dropQueuedUsage(qc: QueryClient, serverId: string): Promise<void> {
+  if (!usageQueue.waiting(serverId)) return;
+  const cancelled = qc.cancelQueries({ queryKey: qk.usage(serverId), exact: true }, { revert: true }); // previous data, no error
+  usageQueue.drop(serverId);
+  await cancelled;
+}
+
+/** A device shown again in the panel reads its state when its card mounts (it may have changed while hidden). */
+export const markForReread = (qc: QueryClient, serverId: string) =>
+  qc.invalidateQueries({ queryKey: qk.state(serverId), exact: true }, { cancelRefetch: false });
+
 /** /api/usage/all WITHOUT force, through the cross-device FIFO gate; >= 5 min between automatic reads. */
 export function useHostUsage(t: Transport, h: PluginHostSummary, refreshMs: number | false) {
   const rpc = t.kind(h.serverId) === "rpc";
   const enabled = canQuery(t, h);
   const q = useQuery({
     queryKey: qk.usage(h.serverId),
-    // Queued reads stay in the gate after an unmount and fill the cache; the transport re-checks the opt-in.
-    queryFn: async (): Promise<UsageView> => unwrap(await usageGate.run(() => t.usage(h.serverId))),
+    // Queued reads stay in the gate after an unmount and fill the cache (the transport re-checks the opt-in);
+    // only hiding the device drops one that has not started (dropQueuedUsage).
+    queryFn: async (): Promise<UsageView> => unwrap(await usageQueue.run(h.serverId, () => t.usage(h.serverId))),
     enabled,
     staleTime: MIN_USAGE_REFRESH_MS,
     gcTime: 30 * 60_000,
@@ -176,7 +195,31 @@ async function withHostLock<T>(serverId: string, fn: () => Promise<OpResult<T>>)
   }
 }
 
-export const useHostBusy = (serverId: string): boolean => useIsMutating({ mutationKey: qk.mutation(serverId) }) > 0;
+export const useHostBusy = (serverId: string): boolean => {
+  const own = useIsMutating({ mutationKey: qk.mutation(serverId) });
+  const all = useIsMutating({ mutationKey: qk.autoAll, predicate: (m) => ((m.state.variables as AutoAllInput | undefined)?.ids ?? []).includes(serverId) });
+  return own + all > 0;
+};
+
+/**
+ * Every device's last read state, straight from the cache: each card owns its query. No observer is added,
+ * so nothing here can change how those queries fetch (an observer's options would become the query's).
+ */
+export function useCachedStates(serverIds: readonly string[]): readonly (StateView | undefined)[] {
+  const qc = useQueryClient();
+  const key = serverIds.join(" ");
+  const read = () => serverIds.map((id) => qc.getQueryData<StateView>(qk.state(id)));
+  const [states, setStates] = useState(read);
+  useEffect(() => {
+    const update = () => setStates((old) => {
+      const now = read();
+      return now.length === old.length && now.every((x, i) => x === old[i]) ? old : now;
+    });
+    update();
+    return qc.getQueryCache().subscribe(update);
+  }, [qc, key]); // read() follows key
+  return states;
+}
 
 /** Wait for a state read already in flight: it may predate the change, and bridge runs are never aborted. */
 async function settleStateRead(qc: QueryClient, serverId: string): Promise<void> {
@@ -214,17 +257,44 @@ export function useSwap(t: Transport, serverId: string) {
   });
 }
 
+/** Sets one device's automatic rotation and keeps its cached state in step (shared by the card's switch and the panel's). */
+async function setAutoOn(qc: QueryClient, t: Transport, serverId: string, enabled: boolean): Promise<AutoView> {
+  try {
+    const auto = unwrap(await withHostLock(serverId, () => t.setAuto(serverId, enabled)));
+    await settleStateRead(qc, serverId); // a pre-toggle read must not land on top of the new value
+    qc.setQueryData<StateView>(qk.state(serverId), (old) => (old ? withAuto(old, auto) : old));
+    return auto;
+  } finally {
+    // Success or failure: re-read so the derived warnings (auto_idle...) match LLMswapper. No Anthropic calls.
+    await rereadState(qc, serverId).catch(() => undefined);
+  }
+}
+
+export interface AutoAllInput {
+  readonly ids: readonly string[];
+  readonly enabled: boolean;
+}
+export interface AutoAllResult {
+  readonly id: string;
+  readonly error: OpError | null;
+}
+
+/** The panel's switch: the same change on several devices at once, each under its own host lock. */
+export function useSetAutoMany(t: Transport) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: qk.autoAll,
+    mutationFn: ({ ids, enabled }: AutoAllInput): Promise<AutoAllResult[]> =>
+      Promise.all(ids.map((id) => setAutoOn(qc, t, id, enabled).then(() => ({ id, error: null }), (e: unknown) => ({ id, error: opErrorOf(e) })))),
+    retry: false,
+  });
+}
+
 export function useSetAuto(t: Transport, serverId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationKey: qk.mutation(serverId),
-    mutationFn: async (enabled: boolean): Promise<AutoView> => unwrap(await withHostLock(serverId, () => t.setAuto(serverId, enabled))),
+    mutationFn: (enabled: boolean): Promise<AutoView> => setAutoOn(qc, t, serverId, enabled),
     retry: false,
-    onSuccess: async (auto) => {
-      await settleStateRead(qc, serverId); // a pre-toggle read must not land on top of the new value
-      qc.setQueryData<StateView>(qk.state(serverId), (old) => (old ? withAuto(old, auto) : old));
-    },
-    // Success or failure: re-read so the derived warnings (auto_idle...) match LLMswapper. No Anthropic calls.
-    onSettled: () => rereadState(qc, serverId),
   });
 }

@@ -25,9 +25,19 @@ function briefFor(state: StateView, id: string): BriefView | undefined {
   return a.current?.id === id ? a.current : a.queue.find((q) => q.id === id);
 }
 
-/** One host: a single header line, a few one-line notices, then one compact row per account. */
+/** The account in use in the device's own environment, for the folded header. */
+function activeLabel(state: StateView | undefined): string | null {
+  const own = state?.targets.find((x) => x.kind === "host") ?? state?.targets[0];
+  return (own?.activeId && state?.accounts.find((acc) => acc.id === own.activeId)?.label) || null;
+}
+
+/**
+ * One host: a single header line, a few one-line notices, then one compact row per account. Folded, only
+ * the header shows, with the account in use; its data keeps refreshing so unfolding is instant.
+ */
 export function HostCard(p: {
-  host: PluginHostSummary; isPluginHost: boolean; transport: Transport; refreshMs: number | false; now: number; styles: Styles; theme: PluginTheme;
+  host: PluginHostSummary; isPluginHost: boolean; transport: Transport; refreshMs: number | false; now: number;
+  collapsed: boolean; onToggleCollapsed(): void; styles: Styles; theme: PluginTheme;
 }) {
   const { host, styles, theme, now, transport: t } = p;
   const id = host.serverId;
@@ -53,22 +63,29 @@ export function HostCard(p: {
   const refresh = () => void refreshHost(qc, id);
   const dot = online ? theme.colors.statusSuccess : host.status === "connecting" ? theme.colors.statusWarning : theme.colors.foregroundMuted;
   const usable = (data?.targets ?? []).filter((x) => x.swappable);
+  const active = p.collapsed ? activeLabel(data) : null;
 
+  const folded = p.collapsed;
   return (
     <View style={styles.hostBlock}>
-      <View style={styles.hostHeader}>
+      {/* One line, folded or not: the name and the account in use give way before the controls do. */}
+      <View style={[styles.hostHeader, { flexWrap: "nowrap" }]}>
+        <IconBtn icon={folded ? "ChevronRight" : "ChevronDown"} label={`${folded ? "Desplegar" : "Plegar"} ${host.label}`} expanded={!folded}
+          onPress={p.onToggleCollapsed} styles={styles} theme={theme} />
         <View style={[styles.dot, { backgroundColor: dot }]} />
-        <Text style={styles.hostName} numberOfLines={1}>{host.label}</Text>
-        {t.kind(id) === "bridge" && enabled ? <Text style={styles.tiny}>· terminal</Text> : null}
+        <Text style={[styles.hostName, { flexShrink: 1, minWidth: 0 }]} numberOfLines={1}>{host.label}</Text>
+        {active ? <Text style={[styles.tiny, { flexShrink: 2, minWidth: 0 }]} numberOfLines={1}>{`· ${active}`}</Text> : null}
+        {t.kind(id) === "bridge" && enabled ? <Text style={[styles.tiny, { flexShrink: 0 }]}>· terminal</Text> : null}
         {data ? <AutoPill auto={data.auto} disabled={locked} onToggle={(v) => a.toggleAuto(v, data)} styles={styles} theme={theme} /> : null}
         <View style={{ flex: 1 }} />
-        <Text style={styles.tiny}>{data && state.dataUpdatedAt ? formatAgo(state.dataUpdatedAt, now) : STATUS_TEXT[host.status]}</Text>
+        <Text style={[styles.tiny, { flexShrink: 0 }]}>{data && state.dataUpdatedAt ? formatAgo(state.dataUpdatedAt, now) : STATUS_TEXT[host.status]}</Text>
         {enabled ? (
           <IconBtn icon="RefreshCw" label={`Actualizar ${host.label}`} busy={fetching} disabled={!online} onPress={refresh} styles={styles} theme={theme} />
         ) : null}
       </View>
 
-      {!enabled ? (
+      {/* Folded: only what needs attention stays (errors, warnings that change what a swap does, the last result). */}
+      {!enabled && !folded ? (
         <View style={styles.row}>
           <Text style={[styles.tiny, { flex: 1 }]} numberOfLines={2}>
             {a.optInBlocked ?? "Sin el plugin en este equipo. Para verlo, el panel ejecuta un script corto con «node» en una terminal temporal."}
@@ -80,12 +97,12 @@ export function HostCard(p: {
         </View>
       ) : null}
 
-      {enabled && !online ? (
+      {enabled && !online && !folded ? (
         <InlineNotice tone="muted" styles={styles} theme={theme}
           text={data ? `Sin conexión: datos de ${formatAgo(state.dataUpdatedAt, now)}, cambios desactivados.` : "Sin conexión con el equipo."} />
       ) : null}
 
-      {enabled && online && !data && state.isFetching ? (
+      {enabled && online && !data && state.isFetching && !folded ? (
         <View style={styles.row}>
           <ActivityIndicator size="small" color={theme.colors.foregroundMuted} />
           <Text style={styles.tiny}>{t.kind(id) === "rpc" ? "Leyendo LLMswapper…" : "Leyendo por terminal remota…"}</Text>
@@ -108,16 +125,20 @@ export function HostCard(p: {
               action={a.notice.restoreDir ? { label: "Copiar ruta", onPress: () => void copyText(a.notice?.restoreDir ?? "") } : undefined} />
           ) : null}
           <CompactWarnings warnings={data.warnings} styles={styles} theme={theme} />
-          {usageError ? <InlineNotice tone="muted" text={`Consumo no disponible: ${describeError(usageError).title}.`} styles={styles} theme={theme} /> : null}
-          {data.accounts.length === 0 ? <Text style={styles.tiny}>LLMswapper no tiene cuentas guardadas en este equipo.</Text> : null}
-          <View style={styles.lines}>
-            {data.accounts.map((acc) => (
-              <AccountLine key={acc.id} account={acc} targets={data.targets} usage={usage.data?.byId[acc.id]} brief={briefFor(data, acc.id)}
-                disabled={locked || !acc.swappable || usable.every((x) => x.activeId === acc.id)}
-                pending={a.pendingSwap?.accountId === acc.id} onPress={() => a.chooseSwap(acc, data)}
-                now={now} styles={styles} theme={theme} />
-            ))}
-          </View>
+          {folded ? null : (
+            <>
+              {usageError ? <InlineNotice tone="muted" text={`Consumo no disponible: ${describeError(usageError).title}.`} styles={styles} theme={theme} /> : null}
+              {data.accounts.length === 0 ? <Text style={styles.tiny}>LLMswapper no tiene cuentas guardadas en este equipo.</Text> : null}
+              <View style={styles.lines}>
+                {data.accounts.map((acc) => (
+                  <AccountLine key={acc.id} account={acc} targets={data.targets} usage={usage.data?.byId[acc.id]} brief={briefFor(data, acc.id)}
+                    disabled={locked || !acc.swappable || usable.every((x) => x.activeId === acc.id)}
+                    pending={a.pendingSwap?.accountId === acc.id} onPress={() => a.chooseSwap(acc, data)}
+                    now={now} styles={styles} theme={theme} />
+                ))}
+              </View>
+            </>
+          )}
         </>
       ) : null}
 
