@@ -1,4 +1,4 @@
-// Main tsconfig only (React Native globals, no @types/node): the few Node APIs server/paseo-cli.ts uses.
+// Main tsconfig only (React Native globals, no @types/node): the few Node APIs server/ uses.
 // tsconfig.test.json checks the same file against the real @types/node.
 declare module "node:child_process" {
   interface Stream {

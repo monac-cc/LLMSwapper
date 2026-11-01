@@ -16,11 +16,11 @@ export function swapNoticeLines(r: SwapView): string[] {
   const s = r.sessions;
   if (s) {
     if (s.note) lines.push(s.note);
-    else if (s.reloading + s.deferred === 0) lines.push("No había sesiones de Paseo abiertas que recargar.");
+    else if (s.reloading + s.deferred === 0) lines.push("Ninguna sesión de Paseo tenía Claude en marcha: la próxima vez que escribas en una, ya irá con la cuenta nueva.");
     else {
       const parts = [
         s.reloading ? `${plural(s.reloading, "sesión de Paseo se recarga", "sesiones de Paseo se recargan")} ya` : "",
-        s.deferred ? `${plural(s.deferred, "sesión", "sesiones")} al terminar su turno` : "",
+        s.deferred ? `${plural(s.deferred, "sesión", "sesiones")} cuando termine${s.deferred === 1 ? "" : "n"} lo que está${s.deferred === 1 ? "" : "n"} haciendo, también en segundo plano` : "",
       ].filter(Boolean);
       lines.push(`${parts.join(" y ")}: conservan la conversación y siguen con la cuenta nueva.`);
     }
