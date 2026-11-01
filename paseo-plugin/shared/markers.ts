@@ -1,4 +1,4 @@
-import { formatAgo, formatCountdown, formatShortCountdown, severityOf } from "./format.ts";
+import { formatAgo, formatCountdown, formatPercent, formatShortCountdown, severityOf } from "./format.ts";
 import type { AccountView, BriefView, MeterView, UsageEntryView } from "./views.ts";
 
 export type Tone = "muted" | "success" | "warning" | "danger";
@@ -53,6 +53,22 @@ export function metersFor(u: UsageEntryView | undefined, brief: BriefView | unde
     return { session: fromBrief(brief.sessionPercent, brief.sessionResetsAt), weekly: fromBrief(brief.weeklyPercent, brief.weeklyResetsAt), cached: true };
   }
   return { session: null, weekly: null, cached: false };
+}
+
+/** Ultra has no 5-hour window (weekly limit only): its row shows the 7-day bar alone. Unknown tier keeps both. */
+export const hasSessionWindow = (a: Pick<AccountView, "tier">): boolean => a.tier !== "ultra";
+
+/** A reading whose window has reset since it was taken says nothing about the new window. */
+export const liveMeter = (m: MeterView | null, now: number): MeterView | null =>
+  m && !(m.resetsAt !== null && m.resetsAt <= now) ? m : null;
+
+/** The meters part of an account row's accessibility label, in bar order. Pure (unit-tested). */
+export function metersA11y(a: Pick<AccountView, "tier">, meters: Meters, now: number): string[] {
+  const describe = (label: string, raw: MeterView | null) => {
+    const m = liveMeter(raw, now);
+    return `${label} ${formatPercent(m?.percent ?? null)}${m?.resetsAt ? `, reinicio ${formatCountdown(m.resetsAt, now)}` : ""}`;
+  };
+  return [hasSessionWindow(a) ? describe("5 horas", meters.session) : "sin límite de 5 horas", describe("7 días", meters.weekly)];
 }
 
 /** Never re-poll queued entries sooner than this, whatever retryInS says (a bridge read spawns a terminal). */

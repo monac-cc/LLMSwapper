@@ -3,7 +3,7 @@
 // Thin CLI over the running LLMSwapper server, for the /swapper* skills. Zero dependencies,
 // Node 18+ (global fetch). Talks only to the local panel; the panel does the real work.
 //
-//   node swapper.mjs usage              every account: 5h and 7d quota, who is in use
+//   node swapper.mjs usage              every account: 5h and 7d quota, who is in use (Ultra: 7d only)
 //   node swapper.mjs swap <name>        switch the host's active account to the one named
 //   node swapper.mjs auto on|off|status automatic rotation: state and the whole queue
 //
@@ -66,6 +66,10 @@ function line(marker, name, s, w, state) {
 // The column header sits over the numbers with the title at the left.
 const head = (title, right) => `${pad(`  ${title}`, 2 + 2 + NAME_W)} ${'5h'.padStart(4)}   ${'7d'.padStart(4)}${right ? `   ${right}` : ''}`;
 
+// An Ultra account has no 5-hour window: its column reads "—", and the week is what it spends.
+// Older panels send no tier, which reads as "not Ultra" and keeps the table as it was.
+const isUltra = (a) => !!a && a.tier === 'ultra';
+
 function levelWord(s) {
   if (s == null) return '';
   if (s >= 95) return 'tope';
@@ -73,16 +77,16 @@ function levelWord(s) {
   return '';
 }
 
-// State words for a usage row, joined with " · ".
-function stateOf(u, active, extra) {
+// State words for a usage row, joined with " · ". `ultra` reads the week instead of the session.
+function stateOf(u, active, extra, ultra = false) {
   const words = [];
   if (active) words.push('en uso');
   if (u && !u.ok) words.push(u.needsRelogin ? 'caducada' : 'sin datos');
   else {
-    const s = u && u.ok && u.session ? u.session.percent : null;
-    const lw = levelWord(s);
+    const win = u && u.ok ? u[ultra ? 'weekly' : 'session'] : null;
+    const lw = levelWord(win ? win.percent : null);
     if (lw) words.push(lw);
-    if (active) { const r = resetIn(u && u.ok && u.session && u.session.resetsAt); if (r) words.push(`reset ${r}`); }
+    if (active) { const r = resetIn(win && win.resetsAt); if (r) words.push(`reset ${r}`); }
   }
   if (extra) words.push(extra);
   return words.join(' · ');
@@ -99,18 +103,21 @@ async function cmdUsage() {
 
   const sess = (a) => { const u = usage[a.id]; return u && u.ok && u.session ? u.session.percent : null; };
   const week = (a) => { const u = usage[a.id]; return u && u.ok && u.weekly ? u.weekly.percent : null; };
+  // What each account is ranked by, as the rotation does: the session, or the week for Ultra.
+  const key = (a) => (isUltra(a) ? week(a) : sess(a));
   const ord = [...accounts].sort((a, b) => {
     if ((a.id === activeId) !== (b.id === activeId)) return a.id === activeId ? -1 : 1;
-    return (sess(a) ?? 999) - (sess(b) ?? 999);
+    return (key(a) ?? 999) - (key(b) ?? 999);
   });
-  // The one worth switching to: freest session with room in both windows, not the active.
-  const freest = ord.find((a) => a.id !== activeId && sess(a) != null && sess(a) < 90 && (week(a) ?? 0) < 90) || null;
+  // The one worth switching to: freest by its key with room in both windows, not the active. An
+  // absent 5-hour window reads 0%, so it never holds an Ultra account back.
+  const freest = ord.find((a) => a.id !== activeId && key(a) != null && key(a) < 90 && (sess(a) ?? 0) < 90 && (week(a) ?? 0) < 90) || null;
 
   const out = ['', head('Swapper · host'), ''];
   for (const a of ord) {
     const active = a.id === activeId;
     const marker = active ? '●' : freest && a.id === freest.id ? '→' : ' ';
-    out.push(line(marker, displayName(a, accounts), sess(a), week(a), stateOf(usage[a.id], active, freest && a.id === freest.id ? 'más libre' : '')));
+    out.push(line(marker, displayName(a, accounts), isUltra(a) ? null : sess(a), week(a), stateOf(usage[a.id], active, freest && a.id === freest.id ? 'más libre' : '', isUltra(a))));
   }
   out.push('');
   console.log(out.join('\n'));
@@ -143,7 +150,7 @@ async function cmdSwap(args) {
 
   const s = u && u.ok && u.session ? u.session.percent : null;
   const w = u && u.ok && u.weekly ? u.weekly.percent : null;
-  const out = ['', line('●', displayName({ ...acc, label: r.account.label }, accounts), s, w, stateOf(u, true, already ? 'ya estaba' : ''))];
+  const out = ['', line('●', displayName({ ...acc, label: r.account.label }, accounts), isUltra(acc) ? null : s, w, stateOf(u, true, already ? 'ya estaba' : '', isUltra(acc)))];
   out.push(`    ${already ? 'sin cambios' : 'se aplica a sesiones nuevas de Claude Code'}${r.verified ? ' · token verificado' : ''}`);
   for (const wmsg of r.warnings || []) out.push(`    ${wmsg}`);
   out.push('');
@@ -166,15 +173,17 @@ async function cmdAuto(args) {
 
   if (st.current) {
     const c = st.current;
+    const u = isUltra(c);
     const words = ['en uso'];
-    const lw = levelWord(c.sessionPercent); if (lw) words.push(lw);
-    const r = resetIn(c.sessionResetsAt); if (r) words.push(`reset ${r}`);
-    out.push(line('●', displayName(c, all), c.sessionPercent, c.weeklyPercent, words.join(' · ')));
+    const lw = levelWord(u ? c.weeklyPercent : c.sessionPercent); if (lw) words.push(lw);
+    const r = resetIn(u ? c.weeklyResetsAt : c.sessionResetsAt); if (r) words.push(`reset ${r}`);
+    out.push(line('●', displayName(c, all), u ? null : c.sessionPercent, c.weeklyPercent, words.join(' · ')));
   }
   for (const q of st.queue || []) {
+    const u = isUltra(q);
     const marker = q.role === 'next' ? '→' : ' ';
-    const state = q.role === 'next' ? 'siguiente' : q.eligible ? levelWord(q.sessionPercent) : `excluida · ${q.reason}`;
-    out.push(line(marker, displayName(q, all), q.sessionPercent, q.weeklyPercent, state));
+    const state = q.role === 'next' ? 'siguiente' : q.eligible ? levelWord(u ? q.weeklyPercent : q.sessionPercent) : `excluida · ${q.reason}`;
+    out.push(line(marker, displayName(q, all), u ? null : q.sessionPercent, q.weeklyPercent, state));
   }
   if (!st.enabled) out.push('', '    /swapper-auto on para activar');
   out.push('');

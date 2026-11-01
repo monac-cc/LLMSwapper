@@ -338,6 +338,24 @@ code {
 }
 .name-edit:focus-visible { outline-offset: 1px; }
 
+/* Ocupa la celda del plan, como .name-edit la del nombre. */
+.plan-edit {
+  grid-column: 3; grid-row: 1;
+  font: inherit; font-size: 11px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--phos);
+  border-radius: var(--r-sm);
+  padding: 0.08rem 0.2rem;
+  cursor: pointer;
+}
+.plan-edit:focus-visible { outline-offset: 1px; }
+
+/* La lista desplegable la pinta el sistema, y la pinta con el esquema que le digan: sin esto, un
+   tema oscuro elegido a mano sobre un sistema claro abre una lista blanca. */
+select { color-scheme: dark; }
+:root[data-theme="light"] select { color-scheme: light; }
+
 /* Loading is a state, so it reads as one: the icon turns, nothing else moves. */
 .is-loading .ico { animation: spin 800ms linear infinite; }
 @keyframes spin { to { transform: rotate(1turn); } }
@@ -577,7 +595,10 @@ main { max-width: 1180px; margin: 0 auto; }
 
 .who {
   min-width: 0;
-  display: grid; grid-template-columns: auto 1fr;
+  /* Punto, nombre, plan. El nombre crece hasta su ancho y luego se corta con elipsis; el plan va
+     pegado a él y no al borde de la celda, que con nombres cortos lo dejaría flotando. */
+  display: grid; grid-template-columns: auto minmax(0, auto) auto;
+  justify-content: start;
   column-gap: 0.55rem; align-items: baseline;
 }
 
@@ -595,6 +616,25 @@ main { max-width: 1180px; margin: 0 auto; }
   font-size: 13px; font-weight: 700; letter-spacing: 0.01em;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+
+/* El plan: una etiqueta que es también la puerta para cambiarlo. Neutra a propósito, sea cual sea
+   el plan: aquí un color siempre significa un estado, y un plan no lo es. Sin indicar se dibuja a
+   trazos, como un hueco por rellenar. */
+.plan {
+  grid-column: 3; grid-row: 1;
+  font: inherit; font-size: 10.5px; letter-spacing: 0.04em;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 0.08rem 0.42rem;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.plan:hover { color: var(--phos); border-color: var(--line-strong); }
+.plan.is-unset { color: var(--text-3); background: transparent; border-style: dashed; border-color: var(--line-strong); }
+.plan.is-unset:hover { color: var(--phos); }
 
 
 /* ---------- meters ----------
@@ -716,6 +756,22 @@ main { max-width: 1180px; margin: 0 auto; }
 }
 /* El nombre es opcional y corto: no debe competir por el ancho con el token, que es largo. */
 #token-label { flex: 0 1 11rem; min-width: 7rem; }
+/* El tipo de cuenta, con el aspecto de los campos de al lado. Mientras no se elige, se lee como
+   un placeholder; tras un intento de enviar sin él, con el borde del error. */
+.field-line select {
+  flex: none;
+  font: inherit; font-size: 12.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 0.38rem 0.45rem;
+  cursor: pointer;
+}
+.field-line select:has(option[value=""]:checked) { color: var(--text-3); }
+.field-line select option { color: var(--text); }
+.field-line select:focus-visible { border-color: var(--phos); outline-offset: 1px; }
+.field-line select[aria-invalid="true"] { border-color: var(--crit); }
 /* flex-start, no center: todo lo demás dentro de .empty (h2, .steps, .footnote) va alineado a
    la izquierda, y centrar solo los botones rompía el margen izquierdo de la tarjeta. */
 .empty-actions { display: flex; gap: 0.5rem; justify-content: flex-start; flex-wrap: wrap; }
@@ -837,6 +893,22 @@ main { max-width: 1180px; margin: 0 auto; }
   }
   .meter[data-kind="session"]::before { content: "session · 5h"; }
   .meter[data-kind="weekly"]::before { content: "week · 7d"; }
+
+  /* Ultra no tiene ventana de 5 h: apilada, la fila lleva solo la semana. La celda de la sesión
+     sale de la vista pero no del árbol, así que un lector de pantalla sigue oyendo "sin límite
+     de 5 h" (las mismas reglas que .sr-only). */
+  .row.is-weekly-only {
+    grid-template-areas:
+      "who     actions"
+      "weekly  weekly"
+      "note    note";
+  }
+  .row.is-weekly-only .meter[data-kind="session"] {
+    grid-area: auto;
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
+  }
 }
 
 /* A 26px hit area is fine for a mouse and too small for a thumb. Grow the target
@@ -844,6 +916,9 @@ main { max-width: 1180px; margin: 0 auto; }
 @media (pointer: coarse) {
   .btn-icon { width: 44px; height: 44px; }
   .btn { padding-block: 0.62rem; }
+  /* The plan badge is a button too: its hit area grows past its edges, the badge does not. */
+  .plan { position: relative; }
+  .plan::after { content: ""; position: absolute; inset: -12px -6px; }
 }
 
 @media (max-width: 560px) {
@@ -852,6 +927,11 @@ main { max-width: 1180px; margin: 0 auto; }
   .toolbar { width: 100%; flex-wrap: wrap; }
   .toolbar .btn { flex: 1; justify-content: center; }
   .sync { width: 100%; margin: 0 0 0.2rem; }
+  /* Editando, el tipo de cuenta baja a su propia línea y el nombre se queda todo el ancho: al
+     lado del tipo, el campo del nombre se quedaba en tres letras. */
+  .row.is-renaming .who { grid-template-columns: auto minmax(0, 1fr); }
+  .row.is-renaming .name-edit { width: 100%; }
+  .plan-edit { grid-column: 2; grid-row: 2; justify-self: start; margin-top: 0.4rem; }
 }
 
 /* 360px explicito: aflojar margenes y encoger las lecturas para que nada se salga ni se

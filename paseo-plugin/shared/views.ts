@@ -60,8 +60,12 @@ export const TargetView = z.object({
   swappable: z.boolean(),
 });
 export type TargetView = z.infer<typeof TargetView>;
+/** Claude plan as LLMswapper knows it (the user says it for pasted tokens). null = unknown or an older LLMswapper. */
+export const AccountTier = z.enum(["free", "pro", "max", "ultra"]);
+export type AccountTier = z.infer<typeof AccountTier>;
 export const AccountView = z.object({
   id: z.string(), label: z.string(), email: z.string().nullable(), color: z.string(), plan: z.string().nullable(),
+  tier: AccountTier.nullable(),
   tokenExpired: z.boolean(), sessionEndsAt: z.number().nullable(), canReadUsage: z.boolean(),
   renewable: z.boolean(), expiresAt: z.number().nullable(), swappable: z.boolean(),
 });

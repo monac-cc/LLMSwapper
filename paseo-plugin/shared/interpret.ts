@@ -7,9 +7,9 @@ import {
   type RawUsageOk, type RawUsageErr,
 } from "./llmswapper-schemas.ts";
 import type { SwapperOp } from "./plan.ts";
-import type {
-  AccountView, AutoView, BriefView, HealthView, MeterView, OpError, OpResult, StateView, SwapView,
-  TargetView, UsageEntryView, UsageView, WarningView,
+import {
+  AccountTier, type AccountView, type AutoView, type BriefView, type HealthView, type MeterView, type OpError,
+  type OpResult, type StateView, type SwapView, type TargetView, type UsageEntryView, type UsageView, type WarningView,
 } from "./views.ts";
 import { deriveWarnings } from "./warnings.ts";
 
@@ -62,6 +62,11 @@ function parseExchange<S extends z.ZodType>(r: RawResult | undefined, schema: S,
 
 const strings = (xs: readonly (string | null)[] | undefined): string[] => (xs ?? []).filter((x): x is string => typeof x === "string");
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+/** A tier this plugin does not know (a newer plan name, a typo) is shown as unknown: both bars, as before tiers. */
+const toTier = (t: string | null | undefined): AccountTier | null => {
+  const p = AccountTier.safeParse(t);
+  return p.success ? p.data : null;
+};
 
 function toMeter(m: { percent: number; resetsAt: string | null; severity: string }): MeterView {
   const percent = m.severity === "unknown" ? null : clampPercent(m.percent);
@@ -122,8 +127,8 @@ export function interpretState(results: ExecResults, ctx: InterpretContext): OpR
   const targets: TargetView[] = t.data.targets.map((x) => ({ ...x, swappable: isTargetId(x.id) }));
   const accounts: AccountView[] = a.data.accounts.map((x) => ({
     id: x.id, label: x.label, email: x.email, color: COLOR_RE.test(x.color) ? x.color : "#888888", plan: x.plan,
-    tokenExpired: x.tokenExpired, sessionEndsAt: x.sessionEndsAt ?? null, canReadUsage: x.canReadUsage ?? true,
-    renewable: x.renewable ?? true, expiresAt: x.expiresAt, swappable: isAccountId(x.id),
+    tier: toTier(x.tier), tokenExpired: x.tokenExpired, sessionEndsAt: x.sessionEndsAt ?? null,
+    canReadUsage: x.canReadUsage ?? true, renewable: x.renewable ?? true, expiresAt: x.expiresAt, swappable: isAccountId(x.id),
   }));
   return {
     ok: true,

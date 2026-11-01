@@ -118,6 +118,8 @@ what it prints. Lasts a year, no renewal. The form has an **open a terminal for 
 the command for you.
 
 - Grants one scope, `user:inference`, so it has no email, plan or organisation - it shows the name you give it.
+- So the form also asks for the plan - **Free, Pro, Max or Ultra** - which the row lets you change later. An imported account reports its own.
+- **Ultra** (formerly Max 20x) has no 5-hour limit: its row shows only the weekly meter, `/swapper-usage` prints `—` for its 5h, and automatic rotation watches its week.
 - **Quota meters still work**, from a different source. See below.
 
 **Import a live session** - `claude` then `/login`, then press **import**. Full scope, so it
@@ -272,7 +274,7 @@ it lists them and asks for the email rather than guessing. The change lands on *
 sessions; one already open keeps its token.
 
 **Automatic rotation** (`/swapper-auto on`). The server then watches the active account and, the
-moment its 5-hour session reaches **90%**, swaps to the freshest account that still has room — so
+moment its 5-hour session (its week, on an Ultra account) reaches **90%**, swaps to the freshest account that still has room — so
 your next `claude` launch lands on capacity you have not spent. It only rotates into an account
 below the threshold in both windows; if none qualifies it stays put. State is on disk, so it
 survives a restart, and it is the same audited swap (backup, verify, roll back) as a manual one.
@@ -347,7 +349,7 @@ you use fits, an issue naming it and where it stores credentials is the most use
 ## Development
 
 ```bash
-node test.js        # 103 checks, ~13 s, no external network
+node test.js        # 111 checks, ~16 s, no external network
 ```
 
 Every `fetch` is stubbed, so a run never spends the usage endpoint's budget. Each module has its

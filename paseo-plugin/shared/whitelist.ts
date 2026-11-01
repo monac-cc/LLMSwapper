@@ -21,7 +21,7 @@ export const PICK = {
   accounts: {
     activeId: 1,
     accounts: [{
-      id: 1, label: 1, email: 1, color: 1, plan: 1, isActive: 1, tokenExpired: 1,
+      id: 1, label: 1, email: 1, color: 1, plan: 1, tier: 1, isActive: 1, tokenExpired: 1,
       sessionEndsAt: 1, canReadUsage: 1, renewable: 1, expiresAt: 1, lastSwappedAt: 1,
     }],
   },

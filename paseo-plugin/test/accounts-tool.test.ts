@@ -103,3 +103,35 @@ test("--sin-cifrar: no passphrase on either side, same import", async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("the plan travels with each account: chosen tier, else the profile's rate-limit tier; unknown is left out", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "swp-accounts-tier-"));
+  try {
+    const store = path.join(dir, "accounts.json");
+    const pasted = (n: string) => ({ accessToken: tok(n), refreshToken: null });
+    fs.writeFileSync(store, JSON.stringify({ version: 1, accounts: [
+      { id: "acc_aaaaaa", label: "Ultra", color: "#7c5cff", tier: "ultra", oauth: pasted("U") },
+      { id: "acc_bbbbbb", label: "Perfil", color: "#22d3ee", tier: null, profile: { organizationRateLimitTier: "default_claude_max_5x" }, oauth: pasted("M") },
+      { id: "acc_cccccc", label: "Raro", color: "#000000", tier: "enterprise", oauth: pasted("X") },
+      { id: "acc_dddddd", label: "Viejo", color: "#000000", oauth: pasted("V") },
+    ] }));
+    const out = path.join(dir, "cuentas.mjs");
+    const env = { ...process.env };
+    delete env.LLMSWAPPER_PASS;
+    const ex = spawnSync(process.execPath, [TOOL, "export", "--store", store, "--out", out, "--sin-cifrar"], { env, encoding: "utf8", input: "" });
+    assert.equal(ex.status, 0, ex.stderr);
+    const sw = await fakeSwapper();
+    try {
+      const run = await runAsync([out, "--port", String(sw.port)], env);
+      assert.equal(run.status, 0, run.stderr + run.stdout);
+      const posts = sw.received.filter((r) => r.method === "POST");
+      assert.deepEqual(posts.map((p) => [p.body.label, p.body.tier]), [["Ultra", "ultra"], ["Perfil", "max"], ["Raro", undefined], ["Viejo", undefined]]);
+      // no tier key at all: LLMswapper keeps whatever tier that account already has there
+      assert.ok(!("tier" in posts[2].body) && !("tier" in posts[3].body));
+    } finally {
+      sw.close();
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

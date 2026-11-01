@@ -8,8 +8,8 @@
 //
 //   node llmswapper-cuentas.mjs [--port 7373]
 //
-// asks the passphrase and adds every account through LLMswapper's own POST /api/accounts/token, then
-// restores its colour. Tokens are never printed. Accounts imported with /login (rotating refresh token)
+// asks the passphrase and adds every account through LLMswapper's own POST /api/accounts/token (with its
+// plan: free/pro/max/ultra), then restores its colour. Tokens are never printed. Accounts imported with /login (rotating refresh token)
 // are NOT exported: two devices refreshing the same token would kill each other's copy.
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -60,6 +60,19 @@ function readStore(file) {
   return store;
 }
 
+const TIERS = ["free", "pro", "max", "ultra"];
+
+/** The plan the user chose in LLMswapper; else what a profile's rate-limit tier says (LLMswapper's mapping); else null. */
+export function tierOf(a) {
+  if (TIERS.includes(a.tier)) return a.tier;
+  const rl = (a.profile && a.profile.organizationRateLimitTier) || (a.oauth && a.oauth.rateLimitTier) || "";
+  if (typeof rl !== "string") return null;
+  if (/max_20x/.test(rl)) return "ultra";
+  if (/max_5x/.test(rl)) return "max";
+  if (/pro/i.test(rl)) return "pro";
+  return null;
+}
+
 /** Only pasted long-lived tokens are safe to clone across devices. */
 export function selectAccounts(store) {
   const picked = [], skipped = [];
@@ -68,7 +81,7 @@ export function selectAccounts(store) {
     const name = (a && a.label) || (a && a.email) || (a && a.id) || "?";
     if (!o || typeof o.accessToken !== "string" || !o.accessToken) skipped.push({ name, why: "sin token" });
     else if (o.refreshToken) skipped.push({ name, why: "sesión importada con /login (token renovable): añádela en cada equipo con «claude setup-token»" });
-    else picked.push({ label: a.label || a.email || null, color: typeof a.color === "string" ? a.color : null, token: o.accessToken });
+    else picked.push({ label: a.label || a.email || null, color: typeof a.color === "string" ? a.color : null, tier: tierOf(a), token: o.accessToken });
   }
   return { picked, skipped };
 }
@@ -84,7 +97,7 @@ export function encrypt(plain, pass) {
 // The importer that travels to the other devices. Kept dependency-free and readable: whoever runs it can audit it.
 const IMPORTER = String.raw`#!/usr/bin/env node
 // LLMswapper accounts export. Run on the target device with LLMswapper running:  node __FILE__ [--port 7373]
-// It asks the passphrase, then adds each account through LLMswapper's POST /api/accounts/token.
+// It asks the passphrase, then adds each account (and its plan) through LLMswapper's POST /api/accounts/token.
 // Holds year-long Claude tokens (encrypted). Delete this file once imported everywhere.
 import crypto from "node:crypto";
 const BUNDLE = __BUNDLE__;
@@ -129,7 +142,8 @@ async function main() {
   for (const a of accounts) {
     const name = a.label || "(sin nombre)";
     try {
-      const r = await api("/api/accounts/token", "POST", { token: a.token, label: a.label || undefined });
+      // No tier (unknown, or an export made before tiers): left out, so an existing tier there is kept.
+      const r = await api("/api/accounts/token", "POST", { token: a.token, label: a.label || undefined, tier: a.tier || undefined });
       if (a.color && r.account && r.account.id) await api("/api/accounts/" + r.account.id, "PATCH", { color: a.color }).catch(() => {});
       ok++;
       console.log("  ✔ " + name + (r.account && r.account.id ? " (" + r.account.id + ")" : "") + ((r.warnings || []).length ? " · " + r.warnings.map(scrub).join(" · ") : ""));

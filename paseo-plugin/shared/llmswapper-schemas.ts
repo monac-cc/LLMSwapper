@@ -19,6 +19,8 @@ export const RawTargets = z.object({
 });
 export const RawAccount = z.object({
   id: z.string(), label: z.string(), email: z.string().nullable(), color: z.string(), plan: z.string().nullable(),
+  // LLMswapper after 1.2.15: "free" | "pro" | "max" | "ultra" | null. Any other value (or type) reads as unknown.
+  tier: z.string().nullable().optional().catch(null),
   isActive: z.boolean(), tokenExpired: z.boolean(), sessionEndsAt: z.number().nullable().optional(),
   canReadUsage: z.boolean().optional(), renewable: z.boolean().optional(),
   expiresAt: z.number().nullable(), lastSwappedAt: z.number().nullable(),
