@@ -93,7 +93,19 @@ export const StateView = z.object({
 export type StateView = z.infer<typeof StateView>;
 
 /** Open Paseo sessions of the plugin host after a swap on its own environment (null: not applicable). */
-export const SessionsView = z.object({ reloading: z.number(), deferred: z.number(), note: z.string().nullable() });
+export const SessionsView = z.object({
+  reloading: z.number(),
+  /** Working sessions stopped and continued on the new account (absent from hosts before 0.1.4). */
+  stopped: z.number().default(0),
+  deferred: z.number(),
+  /** Run through WSL, docker or ssh: never reloaded (absent before 0.1.4). */
+  unseen: z.number().default(0),
+  /** Could not be checked; looked at again in the background (absent before 0.1.4). */
+  unchecked: z.number().default(0),
+  /** The host's busySessions setting when the swap was handled (absent before 0.1.4). */
+  mode: z.enum(["stop", "wait"]).optional(),
+  note: z.string().nullable(),
+});
 export type SessionsView = z.infer<typeof SessionsView>;
 
 export const SwapView = z.object({

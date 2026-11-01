@@ -15,6 +15,11 @@ const REFRESH_OPTIONS = [
   { label: "Cada 15 min", value: "15" }, { label: "Cada 30 min", value: "30" },
 ] as const;
 type RefreshValue = (typeof REFRESH_OPTIONS)[number]["value"];
+const BUSY_OPTIONS = [
+  { label: "Parar y seguir con la cuenta nueva", value: "stop" },
+  { label: "Esperar a que terminen", value: "wait" },
+] as const;
+type BusyValue = (typeof BUSY_OPTIONS)[number]["value"];
 
 // ---- text fields: what is on screen is either in the draft or flagged (never a silently different value) ----
 type Parsed<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly error: string };
@@ -188,6 +193,12 @@ export function SettingsScreen({ host }: PluginSurfaceProps) {
         <SettingsSelect<RefreshValue> label="Actualización automática" hint="Solo con el panel abierto; el consumo nunca se fuerza."
           value={String(draft.autoRefreshMinutes) as RefreshValue} options={REFRESH_OPTIONS} disabled={busy}
           onValueChange={(v) => setDraft((d) => ({ ...d, autoRefreshMinutes: Number(v) as SwapperSettings["autoRefreshMinutes"] }))} />
+        <SettingsSelect<BusyValue> label="Sesiones con trabajo en marcha al cambiar de cuenta"
+          hint={draft.busySessions === "stop"
+            ? "Se paran al momento y siguen con la cuenta nueva, así la anterior no gasta más y los workflows se reanudan sin repetir lo terminado. Los agentes delegados por otro agente y los que aún cargan terminan antes con la anterior; las sesiones en WSL, docker o ssh siguen con ella hasta reiniciarlas."
+            : "Terminan con la cuenta anterior (gastándola) y cambian en cuanto acaban."}
+          value={draft.busySessions} options={BUSY_OPTIONS} disabled={busy}
+          onValueChange={(v) => setDraft((d) => ({ ...d, busySessions: v }))} />
         <SettingsSwitch label="Diagnóstico: usar el puente por terminal también aquí" hint="Para probar el puente sin otro equipo. Abre pestañas temporales en este equipo."
           value={draft.bridgeForLocal} disabled={busy} onValueChange={(v) => setDraft((d) => ({ ...d, bridgeForLocal: v }))} />
       </SettingsSection>

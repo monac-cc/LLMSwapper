@@ -51,7 +51,11 @@ export function useHostActions(t: Transport, host: PluginHostSummary) {
     const usable = s.targets.filter((t) => t.swappable);
     const notes: string[] = [];
     for (const t of usable) {
-      if (t.running && t.activeId !== account.id) notes.push(`Claude Code está abierto en ${t.label}: el cambio se aplica a las sesiones NUEVAS.`);
+      if (!t.running || t.activeId === account.id) continue;
+      // Only the machine's own environment is followed by the plugin's session step (and only where the plugin runs).
+      notes.push(t.id === "host"
+        ? `Claude Code está abierto en ${t.label}: las sesiones de Paseo de ese equipo pasan a la cuenta nueva si tiene el plugin (las que tengan trabajo en marcha lo paran y lo retoman, o lo terminan antes, según su ajuste); Claude Code abierto fuera de Paseo sigue con la anterior hasta reiniciarlo.`
+        : `Claude Code está abierto en ${t.label}: el cambio se aplica a las sesiones NUEVAS.`);
     }
     if (s.health.overridingEnv.length > 0) notes.push(`${s.health.overridingEnv.join(", ")} anula el fichero de credenciales: puede no tener efecto.`);
     if (account.tokenExpired) notes.push("El token de esta cuenta ha caducado; LLMswapper intentará renovarlo.");

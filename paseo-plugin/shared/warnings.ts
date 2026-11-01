@@ -17,11 +17,16 @@ export function deriveWarnings(health: HealthView, targets: readonly TargetView[
   if (health.container || health.unavailable.length > 0) {
     w.push({ code: "container", level: "warning", message: "LLMswapper corre en un contenedor: no ve los procesos del host ni los entornos WSL; «Claude abierto» no es fiable." });
   }
-  const running = targets.filter((t) => t.running).map((t) => t.label);
-  if (running.length === 0 && health.claudeRunning) running.push(targets.find((t) => t.kind === "host")?.label ?? "el sistema anfitrión");
-  if (running.length > 0) {
-    w.push({ code: "claude_running", level: "info", message: `Claude Code está abierto en ${running.join(", ")}: un cambio de cuenta se aplica a las sesiones NUEVAS.` });
-  }
+  // The plugin follows swaps of the machine's own environment only; other environments (WSL) reach NEW sessions.
+  const running = targets.filter((t) => t.running);
+  const own = running.filter((t) => t.kind === "host").map((t) => t.label);
+  const others = running.filter((t) => t.kind !== "host").map((t) => t.label);
+  if (running.length === 0 && health.claudeRunning) own.push(targets.find((t) => t.kind === "host")?.label ?? "el sistema anfitrión");
+  const parts = [
+    own.length ? `Claude Code está abierto en ${own.join(", ")}: tras un cambio de cuenta, las sesiones de Paseo con este plugin pasan a la nueva; el Claude Code abierto fuera de Paseo sigue con la anterior hasta reiniciarlo.` : "",
+    others.length ? `Claude Code está abierto en ${others.join(", ")}: un cambio de cuenta en ese entorno se aplica a las sesiones NUEVAS.` : "",
+  ].filter(Boolean);
+  if (parts.length) w.push({ code: "claude_running", level: "info", message: parts.join(" ") });
   for (const t of targets) {
     if (!t.swappable) w.push({ code: "target_readonly", level: "info", message: `El entorno «${t.label}» tiene un id no admitido: se muestra solo en lectura.` });
   }

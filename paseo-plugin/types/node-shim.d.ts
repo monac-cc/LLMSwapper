@@ -6,6 +6,7 @@ declare module "node:child_process" {
     on(event: "data", listener: (chunk: string) => void): Stream;
   }
   interface ChildProcess {
+    readonly stdin: { end(data: string): void; on(event: "error", listener: (error: Error) => void): unknown };
     readonly stdout: Stream;
     readonly stderr: Stream;
     kill(): boolean;
