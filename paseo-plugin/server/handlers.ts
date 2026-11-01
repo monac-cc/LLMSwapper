@@ -14,8 +14,10 @@ type Flight = { readonly gen: number; readonly p: Promise<OpResult<OpData[Read]>
 /** Several clients (desktop, phone, panel + screen) may ask at once; LLMswapper does not dedupe. */
 const STATE_MEMO_MS = 10_000;
 
-/** After a successful swap: make open sessions follow it. Returns what was done, or null when not applicable. */
-export type AfterSwap = (swap: SwapView) => Promise<SessionsView | null>;
+/** After a successful swap: make open sessions follow it, within `budgetMs`. Returns what was done, or null when not applicable. */
+export type AfterSwap = (swap: SwapView, budgetMs: number) => Promise<SessionsView | null>;
+/** Paseo gives a plugin RPC 30 s; the swap and its session summary share them, with a margin for the reply. */
+const RPC_BUDGET_MS = 27_000;
 
 export function createHandlers(getPort: () => Promise<number>, exec: Exec = executePlan, now: () => number = Date.now, afterSwap?: AfterSwap) {
   let mutating = false; // one swap/auto change at a time per daemon (LLMswapper also 409s globally)
@@ -60,12 +62,13 @@ export function createHandlers(getPort: () => Promise<number>, exec: Exec = exec
   async function mutate<K extends "swap" | "auto">(op: Op<K>): Promise<OpResult<OpData[K]>> {
     if (mutating) return { ok: false, error: { code: "host_busy", message: "Ya hay una operación en curso en este equipo." } };
     mutating = true;
+    const started = now();
     try {
       const result = await run(op);
       if ((op as SwapperOp).kind === "swap" && result.ok && afterSwap) {
         const swap = result.data as SwapView;
         // Never fail a swap that LLMswapper already applied because the session step failed.
-        const sessions = await afterSwap(swap).catch(() => null);
+        const sessions = await afterSwap(swap, RPC_BUDGET_MS - (now() - started)).catch(() => null);
         return { ok: true, data: { ...swap, sessions } as OpData[K] };
       }
       return result;
