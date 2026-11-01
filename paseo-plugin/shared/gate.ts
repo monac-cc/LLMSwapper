@@ -44,3 +44,32 @@ export function createSerialGate(spacingMs: number, clock: GateClock) {
   /** Tasks waiting for their turn (not the running one). */
   return { run, queued: () => queued };
 }
+
+export type SerialGate = ReturnType<typeof createSerialGate>;
+
+/**
+ * Per-key tasks through a gate that can be dropped while they wait for their turn (a device hidden in the
+ * panel is not read). A task that already started runs to the end.
+ */
+export function createDroppableQueue(gate: SerialGate) {
+  const waiting = new Map<string, AbortController>();
+  async function run<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const ctrl = new AbortController();
+    waiting.set(key, ctrl);
+    const started = () => { if (waiting.get(key) === ctrl) waiting.delete(key); };
+    try {
+      return await gate.run(() => { started(); return fn(); }, ctrl.signal);
+    } finally {
+      started();
+    }
+  }
+  /** Drops the key's waiting task (it rejects with "Cancelado" without running); false when none waits. */
+  function drop(key: string): boolean {
+    const ctrl = waiting.get(key);
+    if (!ctrl) return false;
+    waiting.delete(key);
+    ctrl.abort();
+    return true;
+  }
+  return { run, drop, waiting: (key: string) => waiting.has(key) };
+}

@@ -2,6 +2,7 @@ import type { PluginTheme } from "@getpaseo/plugin";
 import { Icon } from "@getpaseo/plugin/client/react-native";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import type { Tone } from "../../shared/markers.ts";
+import type { GlobalAuto } from "../../shared/panel.ts";
 import type { AutoView, WarningView } from "../../shared/views.ts";
 import { toneColor, type Styles } from "./theme.ts";
 
@@ -41,6 +42,7 @@ export function AutoPill(p: Base & { auto: AutoView | null; disabled: boolean; o
     <Pressable
       accessibilityRole="switch"
       accessibilityState={{ checked: on, disabled: p.disabled }}
+      aria-checked={on}
       accessibilityLabel={`Rotación automática ${on ? "activada" : "desactivada"}, umbral ${p.auto.threshold} %${p.auto.next ? `, siguiente ${p.auto.next.label}` : ""}`}
       disabled={p.disabled}
       onPress={() => p.onToggle(!on)}
@@ -52,11 +54,41 @@ export function AutoPill(p: Base & { auto: AutoView | null; disabled: boolean; o
   );
 }
 
+/**
+ * The panel's switch for automatic rotation on every device it shows: "auto" when all agree, "auto 2/5"
+ * (dashed) when only some rotate. Turning it on asks for confirmation (caller), off is immediate.
+ */
+export function GlobalAutoPill(p: Base & { summary: GlobalAuto; busy: boolean; onPress(): void }) {
+  const { total, on } = p.summary;
+  const off = total === 0 || p.busy;
+  const mixed = on > 0 && on < total;
+  const color = on > 0 ? p.theme.colors.accent : p.theme.colors.foregroundMuted;
+  const where = total === 1 ? "el equipo disponible" : `los ${total} equipos disponibles`;
+  const skipped = p.summary.skipped ? `; ${p.summary.skipped === 1 ? "1 equipo sin conexión no cambia" : `${p.summary.skipped} equipos sin conexión no cambian`}` : "";
+  const state = (total === 0 ? "sin equipos disponibles" : on === total ? `activada en ${where}` : on === 0 ? `desactivada en ${where}` : `activada en ${on} de ${total} equipos disponibles`) + skipped;
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityState={{ checked: mixed ? "mixed" : total > 0 && on === total, disabled: off, busy: p.busy }}
+      aria-checked={total > 0 && on === total}
+      accessibilityLabel={`Rotación automática ${state}`}
+      accessibilityHint={total === 0 ? undefined : p.summary.turnOn ? "La activa en los equipos disponibles del panel" : "La desactiva en los equipos disponibles del panel"}
+      disabled={off}
+      onPress={p.onPress}
+      style={[p.styles.pill, { borderColor: color }, mixed ? { borderStyle: "dashed" } : null, off && !p.busy ? p.styles.disabled : null]}
+    >
+      {p.busy ? <ActivityIndicator size="small" color={color} style={{ width: 10, height: 10, transform: [{ scale: 0.5 }] }} /> : <Icon name="Repeat2" size={10} color={color} />}
+      <Text style={[p.styles.tiny, { color }]}>{mixed ? `auto ${on}/${total}` : "auto"}</Text>
+    </Pressable>
+  );
+}
+
 /** Icon-only button for headers. */
-export function IconBtn(p: Base & { icon: string; label: string; onPress(): void; disabled?: boolean; busy?: boolean }) {
+export function IconBtn(p: Base & { icon: string; label: string; onPress(): void; disabled?: boolean; busy?: boolean; expanded?: boolean }) {
   const off = p.disabled === true || p.busy === true;
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={p.label} accessibilityState={{ disabled: off, busy: p.busy === true }}
+    // aria-*: the desktop app (react-native-web) reads those, not accessibilityState
+    <Pressable accessibilityRole="button" accessibilityLabel={p.label} accessibilityState={{ disabled: off, busy: p.busy === true, expanded: p.expanded }} aria-expanded={p.expanded}
       disabled={off} onPress={p.onPress} style={[p.styles.iconButton, off && !p.busy ? p.styles.disabled : null]}>
       {/* fixed 13x13 box: the animated spinner must not grow the header row */}
       <View style={{ width: 13, height: 13, alignItems: "center", justifyContent: "center" }}>

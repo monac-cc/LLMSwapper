@@ -31,9 +31,11 @@ export const hostEntry = z.object({
   /** "node" or an absolute path, for daemons whose PATH lacks node. */
   nodeCommand: z.string().regex(NODE_COMMAND_RE).optional(),
   hidden: z.boolean().default(false),
+  /** Folded in the panel: only its header line shows. */
+  collapsed: z.boolean().default(false),
 });
 export type HostEntry = z.output<typeof hostEntry>;
-export const DEFAULT_HOST_ENTRY: HostEntry = { bridge: false, port: DEFAULT_PORT, hidden: false };
+export const DEFAULT_HOST_ENTRY: HostEntry = { bridge: false, port: DEFAULT_PORT, hidden: false, collapsed: false };
 
 export const DEFAULT_REFRESH_MINUTES = 5;
 

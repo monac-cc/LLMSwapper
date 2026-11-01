@@ -7,6 +7,7 @@ import { swapperSettings, type HostEntry, type SwapperSettings } from "../shared
 import { NODE_COMMAND_RE } from "../shared/ids.ts";
 import { messageOf } from "./bridge/errors.ts";
 import { listBridgeWorkspaces, type BridgeWorkspace } from "./bridge/workspace.ts";
+import { sameIgnoringPanel, withPanelFlagsOf } from "../shared/panel.ts";
 import { mergeHostEntry } from "./data/host-settings.ts";
 import { publishRouting } from "./data/transport.ts";
 
@@ -43,6 +44,8 @@ interface Form {
   readonly draft: SwapperSettings;
   /** Revision the draft was seeded from. Saves go against it: a change made elsewhere is a conflict, never a silent overwrite. */
   readonly base: string;
+  /** The document at `base`: tells a real change elsewhere from one made by the panel (a fold, a hidden device). */
+  readonly baseValues: SwapperSettings;
   readonly dirty: boolean;
   readonly saving: boolean;
   /** Field -> error of text that does not parse. Guardar is blocked while any is present. */
@@ -52,7 +55,7 @@ interface Form {
 }
 
 const seed = (prev: Form | null, values: SwapperSettings, revision: string): Form =>
-  ({ draft: values, base: revision, dirty: false, saving: false, invalid: {}, gen: (prev?.gen ?? 0) + 1 });
+  ({ draft: values, base: revision, baseValues: values, dirty: false, saving: false, invalid: {}, gen: (prev?.gen ?? 0) + 1 });
 
 function flag(f: Form, field: string, error: string | null): Form {
   const invalid: Record<string, string> = { ...f.invalid };
@@ -120,7 +123,14 @@ export function SettingsScreen({ host }: PluginSurfaceProps) {
   useEffect(() => {
     if (settings.status !== "ready") return;
     const { values, revision: rev } = settings;
-    setForm((f) => (f && (f.dirty || f.saving || f.base === rev) ? f : seed(f, values, rev)));
+    setForm((f) => {
+      // Only the panel changed something elsewhere (a fold, a hidden device): carry the edits over to the new
+      // revision with those changes, no conflict.
+      if (f && f.dirty && !f.saving && f.base !== rev && sameIgnoringPanel(f.baseValues, values)) {
+        return { ...f, base: rev, baseValues: values, draft: withPanelFlagsOf(f.draft, values, f.baseValues) };
+      }
+      return f && (f.dirty || f.saving || f.base === rev) ? f : seed(f, values, rev);
+    });
   }, [revision, form?.dirty, form?.saving]);
 
   if (settings.status === "loading" || (settings.status === "ready" && !form)) {
@@ -174,6 +184,9 @@ export function SettingsScreen({ host }: PluginSurfaceProps) {
     const ok = await current.save(draft, base);
     if (ok) publishRouting(host.id, draft); // before the revision push re-renders anyone
     // ok: pristine again, the effect re-seeds from the saved document (its new revision is already in place).
+    // Not ok (often a fold or a hidden device saved by the panel in between): read the newer revision now, so the
+    // effect carries the edits over to it, or shows the conflict.
+    else void current.reload();
     update((f) => ({ ...f, saving: false, dirty: ok ? false : f.dirty }));
   };
 
@@ -216,7 +229,7 @@ export function SettingsScreen({ host }: PluginSurfaceProps) {
             <SettingsAction label="Los ajustes cambiaron en otro cliente" hint="Tus cambios sin guardar parten de la versión anterior."
               actionLabel="Descartar los míos" onPress={() => setForm(seed(form, current.values, current.revision))} />
             <SettingsAction label="Mantener mis cambios" hint="Al guardar se sobrescribe lo que se guardó desde el otro cliente."
-              actionLabel="Mantener" onPress={() => update((f) => ({ ...f, base: current.revision }))} />
+              actionLabel="Mantener" onPress={() => update((f) => ({ ...f, base: current.revision, baseValues: current.values, draft: withPanelFlagsOf(f.draft, current.values, f.baseValues) }))} />
           </>
         ) : null}
         <SettingsAction label="Guardar ajustes" hint={form.dirty ? "Hay cambios sin guardar." : undefined}

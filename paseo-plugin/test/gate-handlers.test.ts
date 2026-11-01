@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { executePlan, MAX_BODY_BYTES } from "../server/executor.ts";
 import { createHandlers } from "../server/handlers.ts";
 import type { ExecResults } from "../shared/exec.ts";
-import { createSerialGate } from "../shared/gate.ts";
+import { createDroppableQueue, createSerialGate } from "../shared/gate.ts";
 import { pick } from "../shared/pick.ts";
 import type { Plan } from "../shared/plan.ts";
 import { PICK } from "../shared/whitelist.ts";
@@ -48,6 +48,27 @@ test("gate: an aborted waiter frees its slot (no extra delay for later tasks)", 
   const t0 = c.now();
   await gate.run(async () => undefined);
   assert.equal(c.now() - t0, 20_000, "only the spacing after the first task");
+});
+
+test("droppable queue: a hidden device's read still waiting is dropped, not run; a running one finishes", async () => {
+  const c = fakeClock();
+  const q = createDroppableQueue(createSerialGate(20_000, c));
+  const ran: string[] = [];
+  let finish: () => void = () => undefined;
+  const first = q.run("srv_a", () => { ran.push("a"); return new Promise<string>((r) => (finish = () => r("a"))); });
+  const second = q.run("srv_b", async () => { ran.push("b"); return "b"; });
+  const third = q.run("srv_c", async () => { ran.push("c"); return "c"; });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(q.waiting("srv_a"), false, "srv_a is running");
+  assert.equal(q.drop("srv_a"), false, "nothing waits for srv_a: it is left to finish");
+  assert.equal(q.drop("srv_b"), true);
+  assert.equal(q.drop("srv_b"), false);
+  finish();
+  assert.equal(await first, "a");
+  await assert.rejects(second, /Cancelado/);
+  assert.equal(await third, "c");
+  assert.deepEqual(ran, ["a", "c"]);
+  assert.equal(q.waiting("srv_c"), false);
 });
 
 const okState: ExecResults = {
