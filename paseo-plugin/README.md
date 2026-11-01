@@ -1,6 +1,6 @@
 # LLMswapper for Paseo
 
-A [Paseo](https://paseo.sh) plugin that puts every device's [LLMswapper](../README.md) in one compact panel: one row per account with its 5-hour and 7-day bars, and a press to switch the active Claude account on any paired device. What a user sees in Paseo is in [OVERVIEW.md](OVERVIEW.md).
+A [Paseo](https://paseo.sh) plugin that puts every device's [LLMswapper](../README.md) in one compact panel: one row per account with its 5-hour and 7-day bars (only the weekly bar for Ultra accounts, which have no 5-hour limit), and a press to switch the active Claude account on any paired device. What a user sees in Paseo is in [OVERVIEW.md](OVERVIEW.md).
 
 Requires Paseo 0.11.2 or newer and LLMswapper running on each device.
 
@@ -42,4 +42,4 @@ paseo plugin logs llmswapper --json
 
 ## Copying accounts to other devices
 
-`tools/llmswapper-accounts.mjs export` writes one self-contained file holding LLMswapper's pasted-token accounts (`claude setup-token`), encrypted with a passphrase (`--sin-cifrar` skips it). Running that file on another device with `node` adds every account to its LLMswapper through `POST /api/accounts/token`. Accounts imported with `/login` are not exported: two devices refreshing the same rotating token would kill each other's copy.
+`tools/llmswapper-accounts.mjs export` writes one self-contained file holding LLMswapper's pasted-token accounts (`claude setup-token`), encrypted with a passphrase (`--sin-cifrar` skips it). Running that file on another device with `node` adds every account to its LLMswapper through `POST /api/accounts/token`, with its plan (Free, Pro, Max or Ultra) when the exporting LLMswapper knows it. Accounts imported with `/login` are not exported: two devices refreshing the same rotating token would kill each other's copy.

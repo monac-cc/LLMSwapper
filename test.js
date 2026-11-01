@@ -1600,6 +1600,407 @@ async function checkAsync(name, fn) {
     }
   });
 
+  /* ---------------- tier: el plan de la cuenta (Free, Pro, Max, Ultra) ---------------- */
+
+  // Desde el 2026-10-30 "Max 5x" se llama Max y "Max 20x" Ultra, que en una cuenta verificada no
+  // tiene ventana de 5 horas: solo la semanal. Un setup-token no deja leer el plan: lo dice el usuario.
+  const tokenDe = (c) => ['sk', 'ant', 'oat01', c.repeat(24)].join('-');
+  const scope403 = async () => ({
+    ok: false, status: 403, headers: { get: () => null },
+    text: async () => JSON.stringify({ error: { message: 'OAuth token does not meet scope requirement user:profile' } }),
+  });
+  /** Un servidor de verdad en un puerto libre, y un fetch a él que no pasa por el stub de red. */
+  const conServidor = async (fn) => {
+    const realFetch = global.fetch;
+    const server = require('./server').createServer(0);
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const call = async (method, p, body) => {
+      const res = await realFetch(base + p, {
+        method, headers: { 'Content-Type': 'application/json', 'X-Swapper': '1' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const text = await res.text();
+      assert.ok(!/sk-ant-/.test(text), `una respuesta filtró un token: ${text.slice(0, 120)}`);
+      return { status: res.status, body: JSON.parse(text) };
+    };
+    try { await fn(call); } finally {
+      global.fetch = realFetch;
+      await new Promise((r) => server.close(r));
+    }
+  };
+
+  check('tier: el declarado manda en planLabel, y sin él se deduce del rate-limit con los nombres nuevos', () => {
+    const { planLabel, tierFromRateLimit, effectiveTier } = store;
+    for (const [tier, label] of [['free', 'Free'], ['pro', 'Pro'], ['max', 'Max'], ['ultra', 'Ultra']]) {
+      assert.strictEqual(planLabel({ tier }), label, `${tier} -> ${label}`);
+    }
+    const prof = (t) => ({ profile: { organizationRateLimitTier: t } });
+    // Lo que el usuario eligió gana a lo que diga el perfil.
+    assert.strictEqual(planLabel({ tier: 'pro', ...prof('default_claude_max_20x') }), 'Pro');
+    assert.strictEqual(planLabel(prof('default_claude_max_20x')), 'Ultra', 'max_20x es Ultra');
+    assert.strictEqual(planLabel(prof('default_claude_max_5x')), 'Max', 'max_5x es Max');
+    assert.strictEqual(planLabel(prof('default_claude_pro')), 'Pro');
+    assert.strictEqual(planLabel({ oauth: { subscriptionType: 'max', rateLimitTier: 'default_claude_max_20x' } }), 'Ultra',
+      'también desde el rateLimitTier guardado junto a los tokens');
+    assert.strictEqual(planLabel({ profile: null, oauth: { scopes: ['user:inference'] } }), null, 'sin nada que leer, no inventa');
+
+    assert.strictEqual(tierFromRateLimit(prof('default_claude_max_20x')), 'ultra');
+    assert.strictEqual(tierFromRateLimit(prof('default_claude_max_5x')), 'max');
+    assert.strictEqual(tierFromRateLimit({ oauth: { rateLimitTier: 'default_claude_pro' } }), 'pro');
+    assert.strictEqual(tierFromRateLimit(prof(null)), null);
+    assert.strictEqual(tierFromRateLimit({}), null);
+    assert.strictEqual(tierFromRateLimit(null), null);
+    assert.strictEqual(effectiveTier({ tier: null, ...prof('default_claude_max_20x') }), 'ultra', 'sin declarar: lo que reporta Anthropic');
+    assert.strictEqual(effectiveTier({ tier: 'max', ...prof('default_claude_max_20x') }), 'max');
+    assert.strictEqual(effectiveTier({ tier: 'oro' }), null, 'un valor corrupto en disco no cuenta');
+  });
+
+  check('tier: add() lo guarda, volver a pegar sin tier no lo borra, update() lo cambia o lo limpia, publicView lo expone', () => {
+    const blob = { accessToken: tokenDe('T'), refreshToken: null, expiresAt: Date.now() + 60000, scopes: ['user:inference'] };
+    const a = store.add({ label: 'Grande', email: null, profile: null, oauth: blob, tier: 'ultra' });
+    const view = () => store.publicAccount(a.id);
+    try {
+      assert.strictEqual(store.get(a.id).tier, 'ultra');
+      assert.strictEqual(view().tier, 'ultra');
+      assert.strictEqual(view().plan, 'Ultra', 'el plan aparece aunque el token no tenga perfil');
+
+      store.add({ label: null, email: null, profile: null, oauth: blob });
+      assert.strictEqual(store.get(a.id).tier, 'ultra', 'volver a pegar sin tier no lo borra');
+      store.add({ label: null, email: null, profile: null, oauth: blob, tier: 'oro' });
+      assert.strictEqual(store.get(a.id).tier, 'ultra', 'ni con uno que no es de los cuatro');
+      store.add({ label: null, email: null, profile: null, oauth: blob, tier: 'max' });
+      assert.strictEqual(store.get(a.id).tier, 'max', 'con tier, lo sustituye');
+
+      store.update(a.id, { tier: 'free' });
+      assert.strictEqual(view().tier, 'free');
+      store.update(a.id, { tier: 'oro' });
+      assert.strictEqual(view().tier, 'free', 'update ignora lo que no es uno de los cuatro');
+      store.update(a.id, { tier: null });
+      assert.strictEqual(store.get(a.id).tier, null);
+      assert.strictEqual(view().tier, null, 'null es "desconocido"');
+      assert.strictEqual(view().plan, null);
+      assert.ok(!JSON.stringify(store.publicView()).includes('sk-ant-'), 'publicView filtró un token');
+    } finally { store.remove(a.id); }
+
+    // Nueva y sin tier: null explícito, no el campo ausente.
+    const b = store.add({ label: null, email: null, profile: null, oauth: { ...blob, accessToken: tokenDe('W') } });
+    try {
+      assert.strictEqual(store.get(b.id).tier, null);
+      assert.strictEqual(store.publicAccount(b.id).tier, null);
+      assert.strictEqual(store.publicAccount(b.id).tierDeclared, null);
+    } finally { store.remove(b.id); }
+
+    // Deducido de Anthropic: tier dice Ultra, tierDeclared null; declararlo lo distingue.
+    const c = store.add({ label: null, email: null, profile: { organizationRateLimitTier: 'default_claude_max_20x' }, oauth: { ...blob, accessToken: tokenDe('X') } });
+    try {
+      assert.strictEqual(store.publicAccount(c.id).tier, 'ultra');
+      assert.strictEqual(store.publicAccount(c.id).tierDeclared, null, 'solo deducido, no declarado');
+      store.update(c.id, { tier: 'max' });
+      assert.strictEqual(store.publicAccount(c.id).tier, 'max');
+      assert.strictEqual(store.publicAccount(c.id).tierDeclared, 'max');
+    } finally { store.remove(c.id); }
+  });
+
+  await checkAsync('POST /api/accounts/token: tier válido se guarda, inválido es 400 sin tocar la red, y volver a pegar sin él no lo borra', async () => {
+    const token = tokenDe('V');
+    const id = store.idForToken(token);
+    try {
+      await conServidor(async (call) => {
+        let probes = 0;
+        global.fetch = async () => { probes++; return scope403(); };
+        for (const tier of ['oro', '', 'ULTRA', 5, {}]) {
+          const bad = await call('POST', '/api/accounts/token', { token, tier });
+          assert.strictEqual(bad.status, 400, `tier ${JSON.stringify(tier)}`);
+          assert.match(bad.body.error, /Tipo de cuenta no válido/);
+        }
+        assert.strictEqual(probes, 0, 'un tier inválido se corta antes de la sonda');
+        assert.strictEqual(store.get(id), null, 'y no escribe nada');
+
+        const ok = await call('POST', '/api/accounts/token', { token, label: 'Grande', tier: 'ultra' });
+        assert.strictEqual(ok.status, 200);
+        assert.strictEqual(ok.body.account.tier, 'ultra');
+        assert.strictEqual(ok.body.account.plan, 'Ultra');
+        assert.strictEqual(store.get(id).tier, 'ultra');
+
+        // Un cliente antiguo no manda tier; el importador de Paseo manda null si el export no lo traía.
+        assert.strictEqual((await call('POST', '/api/accounts/token', { token })).body.account.tier, 'ultra', 'sin tier no se borra');
+        assert.strictEqual((await call('POST', '/api/accounts/token', { token, tier: null })).body.account.tier, 'ultra', 'null tampoco');
+        assert.strictEqual((await call('POST', '/api/accounts/token', { token, tier: 'max' })).body.account.tier, 'max', 'otro tier lo cambia');
+        assert.strictEqual(store.get(id).label, 'Grande');
+      });
+    } finally { store.remove(id); }
+  });
+
+  await checkAsync('POST /api/accounts/token sin tier: null en un setup-token, y el de su perfil en uno de scope completo', async () => {
+    const inference = tokenDe('X');
+    const full = tokenDe('Y');
+    const fullId = store.idFor({ accountUuid: 'uuid-tier-full' });
+    try {
+      await conServidor(async (call) => {
+        global.fetch = scope403;
+        const a = await call('POST', '/api/accounts/token', { token: inference });
+        assert.strictEqual(a.status, 200);
+        assert.strictEqual(a.body.account.tier, null, 'sin tier ni perfil: desconocido');
+        assert.strictEqual(store.get(a.body.account.id).tier, null);
+
+        // probeToken y fetchProfile preguntan al mismo endpoint: 200 con el perfil para los dos.
+        global.fetch = async () => ({
+          ok: true, status: 200, headers: { get: () => null },
+          text: async () => JSON.stringify({
+            account: { uuid: 'uuid-tier-full', email: 'full@x.y' },
+            organization: { rate_limit_tier: 'default_claude_max_5x', organization_type: 'claude_max' },
+          }),
+        });
+        const b = await call('POST', '/api/accounts/token', { token: full });
+        assert.strictEqual(b.status, 200);
+        assert.strictEqual(b.body.kind, 'full');
+        assert.strictEqual(b.body.account.id, fullId);
+        assert.strictEqual(b.body.account.tier, 'max', 'max_5x del perfil: Max, deducido al leer');
+        assert.strictEqual(b.body.account.plan, 'Max');
+        assert.strictEqual(store.get(fullId).tier, null, 'no declarado: se guarda null y se deduce al leer');
+      });
+    } finally {
+      store.remove(store.idForToken(inference));
+      store.remove(fullId);
+    }
+  });
+
+  await checkAsync('PATCH /api/accounts/:id cambia el tier, null lo limpia y uno inválido es 400 sin tocar nada', async () => {
+    const blob = { accessToken: tokenDe('Z'), refreshToken: null, expiresAt: Date.now() + 60000, scopes: ['user:inference'] };
+    const a = store.add({ label: 'Plan', email: null, profile: null, oauth: blob, tier: 'pro' });
+    try {
+      await conServidor(async (call) => {
+        const up = await call('PATCH', `/api/accounts/${a.id}`, { tier: 'ultra' });
+        assert.strictEqual(up.status, 200);
+        assert.strictEqual(up.body.account.tier, 'ultra');
+        assert.strictEqual(up.body.account.plan, 'Ultra');
+
+        for (const tier of ['diamante', '', 'Max', 1]) {
+          const bad = await call('PATCH', `/api/accounts/${a.id}`, { tier, label: 'Otro' });
+          assert.strictEqual(bad.status, 400, `tier ${JSON.stringify(tier)}`);
+          assert.match(bad.body.error, /Tipo de cuenta no válido/);
+        }
+        assert.strictEqual(store.get(a.id).tier, 'ultra', 'un tier inválido no cambia nada');
+        assert.strictEqual(store.get(a.id).label, 'Plan', 'ni el nombre que venía con él');
+
+        const both = await call('PATCH', `/api/accounts/${a.id}`, { tier: 'max', color: '#112233' });
+        assert.strictEqual(both.body.account.tier, 'max');
+        assert.strictEqual(both.body.account.color, '#112233');
+
+        const cleared = await call('PATCH', `/api/accounts/${a.id}`, { tier: null });
+        assert.strictEqual(cleared.status, 200);
+        assert.strictEqual(cleared.body.account.tier, null, 'null lo devuelve a desconocido');
+        assert.strictEqual(store.get(a.id).tier, null);
+
+        assert.strictEqual((await call('PATCH', '/api/accounts/acc_nolaexiste', { tier: 'pro' })).status, 404);
+      });
+    } finally { store.remove(a.id); }
+  });
+
+  await checkAsync('import: el tier sale del perfil o del rateLimitTier, y si no dicen nada se respeta el que había', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'swapper-tier-import-'));
+    const id = store.idFor({ accountUuid: 'uuid-tier-import' });
+    const sesion = (rateLimitTier) => {
+      fs.writeFileSync(path.join(tmp, '.credentials.json'), JSON.stringify({ claudeAiOauth: {
+        accessToken: 'IMPORT-TIER', refreshToken: 'R-IMPORT-TIER', expiresAt: Date.now() + 3600e3,
+        scopes: ['user:inference', 'user:profile'], subscriptionType: 'max', rateLimitTier,
+      } }));
+      fs.writeFileSync(path.join(tmp, '.claude.json'), '{}');
+    };
+    const perfil = (rateLimitTier) => async () => ({
+      ok: true, status: 200, headers: { get: () => null },
+      text: async () => JSON.stringify({ account: { uuid: 'uuid-tier-import', email: 'imp@x.y' }, organization: { rate_limit_tier: rateLimitTier } }),
+    });
+    try {
+      await conServidor(async (call) => {
+        sesion(null);
+        global.fetch = perfil('default_claude_max_20x');
+        const a = await call('POST', '/api/accounts/import', { configDir: tmp });
+        assert.strictEqual(a.status, 200);
+        assert.strictEqual(a.body.account.id, id);
+        assert.strictEqual(a.body.account.tier, 'ultra');
+        assert.strictEqual(store.get(id).tier, 'ultra', 'un login completo guarda el plan que dice');
+
+        // Ni el perfil ni los tokens lo dicen: el que eligió el usuario se queda.
+        store.update(id, { tier: 'pro' });
+        global.fetch = perfil(null);
+        assert.strictEqual((await call('POST', '/api/accounts/import', { configDir: tmp })).body.account.tier, 'pro');
+        assert.strictEqual(store.get(id).tier, 'pro');
+
+        // Sin rate_limit_tier en el perfil, el rateLimitTier que Claude Code guardó con los tokens.
+        sesion('default_claude_max_5x');
+        assert.strictEqual((await call('POST', '/api/accounts/import', { configDir: tmp })).body.account.tier, 'max');
+        assert.strictEqual(store.get(id).tier, 'max');
+      });
+    } finally {
+      store.remove(id);
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  await checkAsync('rotación con una cuenta Ultra: dispara por la semana, ordena por la semana y una sesión presente aún excluye', async () => {
+    const auto = require('./lib/auto');
+    auto.save({ enabled: true, target: 'host', threshold: 90, lastSwapAt: 0 });
+    const live = { accessToken: 't', expiresAt: Date.now() + 1e6 };
+    const accounts = [
+      { id: 'cur', label: 'Cur', tier: 'ultra', oauth: { ...live } },
+      { id: 'pro', label: 'Pro', tier: 'pro', oauth: { ...live } },
+      // Ultra sin declarar, deducido del perfil: cuenta igual.
+      { id: 'ult', label: 'Ult', tier: null, profile: { organizationRateLimitTier: 'default_claude_max_20x' }, oauth: { ...live } },
+      // Ultra todavía sin verificar: tiene un límite temporal de 5 h, y lleno.
+      { id: 'temp', label: 'Temp', tier: 'ultra', oauth: { ...live } },
+      { id: 'semana', label: 'Semana', tier: 'ultra', oauth: { ...live } },
+    ];
+    // Una ventana ausente sale de usage.meter como 0% con severity 'unknown'.
+    const absent = { percent: 0, resetsAt: null, severity: 'unknown' };
+    const readings = {
+      cur: { ok: true, session: { percent: 99 }, weekly: { percent: 50 } },
+      pro: { ok: true, session: { percent: 30 }, weekly: { percent: 5 } },
+      ult: { ok: true, session: absent, weekly: { percent: 20 } },
+      temp: { ok: true, session: { percent: 95 }, weekly: { percent: 1 } },
+      semana: { ok: true, session: absent, weekly: { percent: 93 } },
+    };
+    let liveId = 'cur';
+    const fakeStore = { list: () => accounts, get: (id) => accounts.find((a) => a.id === id) || null, activeFor: () => liveId };
+    const fakeUsage = {
+      fetchFor: async (a) => readings[a.id],
+      fetchAll: async (list) => Object.fromEntries(list.map((a) => [a.id, readings[a.id]])),
+      cachedFor: (id) => readings[id],
+    };
+    const calls = [];
+    const swap = {
+      asTarget: () => ({ claudeJsonPath: path.join(SANDBOX, 'no-existe.json') }),
+      swapTo: async (id) => { calls.push(id); },
+    };
+    const deps = { store: fakeStore, usage: fakeUsage, swap };
+    try {
+      // Una Ultra verificada no tiene ventana de 5 h: con la semana al 50% no rota.
+      readings.cur = { ok: true, session: absent, weekly: { percent: 50 } };
+      assert.strictEqual(await auto.tick(deps), null, 'Ultra con la semana bajo el umbral: no rota');
+      assert.deepStrictEqual(calls, []);
+
+      // La cola: elegibles por su clave (Ultra la semana, las demás la sesión), luego las excluidas.
+      const st = await auto.status(deps);
+      assert.deepStrictEqual(st.queue.map((q) => [q.id, q.eligible, q.reason]), [
+        ['ult', true, null], ['pro', true, null],
+        ['temp', false, 'sesión 95% ≥ 90%'], ['semana', false, 'semana 93% ≥ 90%'],
+      ]);
+      assert.strictEqual(st.next.id, 'ult', 'la Ultra con la semana al 20% va antes que la Pro con la sesión al 30%');
+      assert.strictEqual(st.current.tier, 'ultra', 'el brief lleva el tier');
+      assert.deepStrictEqual(st.queue.map((q) => q.tier), ['ultra', 'pro', 'ultra', 'ultra'], 'también el deducido');
+      for (const k of ['id', 'label', 'email', 'sessionPercent', 'weeklyPercent', 'sessionResetsAt', 'weeklyResetsAt']) assert.ok(k in st.current, k);
+
+      // Una Ultra sin verificar que SÍ informa una ventana de 5 h llena rota por ella, igual que esa
+      // misma lectura la excluye como candidata.
+      readings.cur = { ok: true, session: { percent: 99 }, weekly: { percent: 50 } };
+      const rs = await auto.tick(deps);
+      assert.strictEqual(rs.window, 'session');
+      assert.strictEqual(rs.at, 99);
+      assert.deepStrictEqual(calls, ['ult']);
+      auto.save({ ...auto.load(), lastSwapAt: 0 });
+
+      readings.cur = { ok: true, session: absent, weekly: { percent: 92 } };
+      const r = await auto.tick(deps);
+      assert.deepStrictEqual(calls, ['ult', 'ult']);
+      assert.strictEqual(r.rotated, true);
+      assert.strictEqual(r.window, 'weekly');
+      assert.strictEqual(r.at, 92);
+      assert.strictEqual(await auto.tick(deps), null, 'el cooldown de 5 minutos sigue igual');
+      assert.strictEqual(calls.length, 2);
+
+      // Una cuenta que no es Ultra sigue rotando por su sesión, como siempre.
+      auto.save({ ...auto.load(), lastSwapAt: 0 });
+      liveId = 'pro';
+      readings.pro = { ok: true, session: { percent: 91 }, weekly: { percent: 5 } };
+      const r2 = await auto.tick(deps);
+      assert.strictEqual(r2.window, 'session');
+      assert.strictEqual(r2.at, 91);
+      assert.deepStrictEqual(calls, ['ult', 'ult', 'ult']);
+
+      // Semana llena y ninguna otra cuenta con margen: un barrido, y luego espera en vez de gastar
+      // la cuota de todas las demás cada 3 minutos durante días.
+      auto.save({ ...auto.load(), lastSwapAt: 0 });
+      liveId = 'cur';
+      readings.cur = { ok: true, session: absent, weekly: { percent: 97 } };
+      for (const id of ['pro', 'ult', 'temp', 'semana']) readings[id] = { ok: true, session: absent, weekly: { percent: 96 } };
+      let sweeps = 0;
+      const fetchAll = fakeUsage.fetchAll;
+      fakeUsage.fetchAll = async (list) => { sweeps++; return fetchAll(list); };
+      const none = await auto.tick(deps);
+      assert.strictEqual(none.rotated, false);
+      assert.strictEqual(sweeps, 1);
+      assert.strictEqual(await auto.tick(deps), null, 'dentro de la espera no vuelve a barrer');
+      assert.strictEqual(sweeps, 1);
+      auto.set({ threshold: 90 }); // cambiar un ajuste levanta la espera
+      await auto.tick(deps);
+      assert.strictEqual(sweeps, 2);
+      assert.ok(auto.WEEKLY_IDLE_MS >= 15 * 60 * 1000);
+      assert.deepStrictEqual(calls, ['ult', 'ult', 'ult'], 'nadie con margen: no cambia');
+    } finally {
+      auto.save({ enabled: false, target: 'host', threshold: 90, lastSwapAt: 0 });
+    }
+  });
+
+  await checkAsync('skills: una cuenta Ultra muestra "—" en la columna 5h y "más libre" se decide por su semana', async () => {
+    const http = require('node:http');
+    const { execFile } = require('node:child_process');
+    const accounts = [
+      { id: 'acc_a', label: 'Activa', email: null, tier: 'pro' },
+      { id: 'acc_p', label: 'ProMedia', email: null, tier: 'pro' },
+      { id: 'acc_u', label: 'UltraLibre', email: null, tier: 'ultra' },
+      { id: 'acc_t', label: 'UltraTemp', email: null, tier: 'ultra' },
+      { id: 'acc_n', label: 'Antigua', email: null }, // un panel sin tier: como siempre
+    ];
+    const absent = { percent: 0, resetsAt: null, severity: 'unknown' };
+    const usageAll = {
+      acc_a: { ok: true, session: { percent: 70 }, weekly: { percent: 40 } },
+      acc_p: { ok: true, session: { percent: 30 }, weekly: { percent: 10 } },
+      acc_u: { ok: true, session: absent, weekly: { percent: 20 } },
+      acc_t: { ok: true, session: { percent: 95 }, weekly: { percent: 2 } },
+      acc_n: { ok: true, session: { percent: 50 }, weekly: { percent: 60 } },
+    };
+    const brief = (a, s, w, extra) => ({ id: a.id, label: a.label, email: null, tier: a.tier || null, sessionPercent: s, weeklyPercent: w, sessionResetsAt: null, weeklyResetsAt: null, ...extra });
+    const autoStatus = {
+      enabled: true, target: 'host', threshold: 90,
+      current: brief(accounts[2], 0, 20),
+      next: brief(accounts[1], 30, 10),
+      queue: [
+        brief(accounts[1], 30, 10, { eligible: true, reason: null, role: 'next' }),
+        brief(accounts[3], 95, 2, { eligible: false, reason: 'sesión 95% ≥ 90%', role: '' }),
+      ],
+    };
+    const fake = http.createServer((req, res) => {
+      const p = new URL(req.url, 'http://x').pathname;
+      const body = p === '/api/accounts' ? { activeId: 'acc_a', accounts } : p === '/api/usage/all' ? usageAll : p === '/api/auto' ? autoStatus : null;
+      res.writeHead(body ? 200 : 404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(body || { error: 'no' }));
+    });
+    await new Promise((r) => fake.listen(0, '127.0.0.1', r));
+    const skill = path.join(__dirname, 'skills', 'swapper', 'swapper.mjs');
+    const run = (args) => new Promise((resolve, reject) => {
+      execFile(process.execPath, [skill, ...args], { env: { ...process.env, PORT: String(fake.address().port) }, timeout: 20000 },
+        (err, stdout, stderr) => (err ? reject(new Error(stderr || err.message)) : resolve(stdout)));
+    });
+    try {
+      const out = await run(['usage']);
+      const row = (text, name) => text.split(/\r?\n/).find((l) => l.includes(name)) || '';
+      assert.match(row(out, 'UltraLibre'), /UltraLibre\s+—\s+20%/, 'Ultra: "—" en 5h, la semana en 7d');
+      assert.match(row(out, 'UltraLibre'), /^ {2}→ .*más libre/, 'la Ultra con la semana al 20% gana a la Pro con la sesión al 30%');
+      assert.match(row(out, 'UltraTemp'), /UltraTemp\s+—\s+2%/, 'el "—" aunque traiga una sesión temporal');
+      assert.doesNotMatch(row(out, 'UltraTemp'), /más libre/, 'esa sesión temporal llena la deja fuera');
+      assert.match(row(out, 'ProMedia'), /ProMedia\s+30%\s+10%/);
+      assert.match(row(out, 'Antigua'), /Antigua\s+50%\s+60%/, 'sin tier, igual que antes');
+
+      const st = await run(['auto', 'status']);
+      assert.match(row(st, 'UltraLibre'), /^ {2}● UltraLibre\s+—\s+20%\s+en uso/);
+      assert.match(row(st, 'UltraTemp'), /UltraTemp\s+—\s+2%\s+excluida · sesión 95%/);
+      assert.match(row(st, 'ProMedia'), /ProMedia\s+30%\s+10%\s+siguiente/);
+    } finally {
+      await new Promise((r) => fake.close(r));
+    }
+  });
+
   /* ---------------- Codex ---------------- */
 
   // Nothing here may read or write the real ~/.codex or a WSL one: CODEX_HOME points at a temp

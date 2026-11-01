@@ -91,7 +91,7 @@ test("countdown and markers", () => {
   assert.equal(formatCountdown(now + (3 * 24 + 4) * 3600_000, now), "en 3 d 4 h");
   assert.equal(formatCountdown(now - 1, now), "ya");
   const m = accountMarkers({
-    id: "acc_a1b2c3", label: "x", email: null, color: "#000000", plan: null, tokenExpired: true,
+    id: "acc_a1b2c3", label: "x", email: null, color: "#000000", plan: null, tier: null, tokenExpired: true,
     sessionEndsAt: now + 3600_000, canReadUsage: false, renewable: false, expiresAt: null, swappable: true,
   }, { kind: "error", message: "401", status: 401, needsRelogin: true, rateLimited: false, throttled: false, retryInS: null }, now);
   assert.deepEqual(m.map((x) => x.key), ["expired", "relogin", "session-ends", "probe", "pasted"]);

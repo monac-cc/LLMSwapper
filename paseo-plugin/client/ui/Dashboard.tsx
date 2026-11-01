@@ -16,7 +16,7 @@ import { makeStyles, seriesColors, type Styles } from "./theme.ts";
 function SeriesLegend(p: { styles: Styles; theme: PluginTheme }) {
   const s = seriesColors(p.theme);
   return (
-    <View style={[p.styles.row, { gap: 6 }]} accessibilityLabel="Barra superior: 5 horas. Barra inferior: 7 días.">
+    <View style={[p.styles.row, { gap: 6 }]} accessibilityLabel="Barra superior: 5 horas. Barra inferior: 7 días. Las cuentas Ultra no tienen límite de 5 horas: solo muestran la de 7 días.">
       {[["5h", s.session], ["7d", s.weekly]].map(([label, color]) => (
         <View key={label} style={[p.styles.row, { gap: 3 }]}>
           <View style={{ width: 8, height: 3, borderRadius: 1, backgroundColor: color }} />

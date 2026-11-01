@@ -1,7 +1,7 @@
 import type { PluginTheme } from "@getpaseo/plugin";
 import { ActivityIndicator, Pressable, Text, View } from "react-native";
-import { formatCountdown, formatPercent, formatPercentShort, formatShortCountdown } from "../../shared/format.ts";
-import { accountMarkers, metersFor } from "../../shared/markers.ts";
+import { formatPercentShort, formatShortCountdown } from "../../shared/format.ts";
+import { accountMarkers, hasSessionWindow, liveMeter, metersA11y, metersFor } from "../../shared/markers.ts";
 import { SESSION_WINDOW_MS, WEEKLY_WINDOW_MS, elapsedPercent, paceTone, type PaceTone } from "../../shared/pace.ts";
 import type { AccountView, BriefView, MeterView, TargetView, UsageEntryView } from "../../shared/views.ts";
 import { seriesColors, toneColor, type Styles } from "./theme.ts";
@@ -13,14 +13,10 @@ function paceColor(theme: PluginTheme, tone: PaceTone, series: string): string {
   return series;
 }
 
-/** A reading whose window has reset since it was taken says nothing about the new window. */
-const live = (m: MeterView | null, now: number): MeterView | null =>
-  m && !(m.resetsAt !== null && m.resetsAt <= now) ? m : null;
-
 /** One thin horizontal meter: fill = usage, tick = share of the window's time already gone. */
 function HBar(p: { meter: MeterView | null; windowMs: number; series: string; dim: boolean; now: number; styles: Styles; theme: PluginTheme }) {
   const c = p.theme.colors;
-  const meter = live(p.meter, p.now);
+  const meter = liveMeter(p.meter, p.now);
   const reset = meter?.resetsAt ?? null;
   const raw = meter?.percent ?? null;
   // One value for the label AND its colour: a "95%" is always red, a "0%" never shows a sliver.
@@ -45,7 +41,7 @@ function HBar(p: { meter: MeterView | null; windowMs: number; series: string; di
   );
 }
 
-/** One account as a single compact row: name on the left, 5 h (top) and 7 d (bottom) bars beside it. */
+/** One account as a single compact row: name on the left, 5 h (top) and 7 d (bottom) bars beside it (Ultra: 7 d only). */
 export function AccountLine(p: {
   account: AccountView; targets: readonly TargetView[]; usage: UsageEntryView | undefined; brief: BriefView | undefined;
   /** Nothing to offer (host locked, or active everywhere it could go): not pressable. */
@@ -59,15 +55,11 @@ export function AccountLine(p: {
   const markers = accountMarkers(a, p.usage, now);
   const alert = markers.find((m) => m.tone === "danger") ?? markers.find((m) => m.tone === "warning");
   const s = seriesColors(theme);
-  const describe = (label: string, raw: MeterView | null) => {
-    const m = live(raw, now);
-    return `${label} ${formatPercent(m?.percent ?? null)}${m?.resetsAt ? `, reinicio ${formatCountdown(m.resetsAt, now)}` : ""}`;
-  };
+  const session = hasSessionWindow(a);
   const a11y = [
     a.label,
     activeIn.length ? `en uso en ${activeIn.map((t) => t.label).join(" y ")}` : null,
-    describe("5 horas", meters.session),
-    describe("7 días", meters.weekly),
+    ...metersA11y(a, meters, now),
     ...markers.map((m) => m.label),
   ].filter(Boolean).join(". ");
 
@@ -94,7 +86,9 @@ export function AccountLine(p: {
         ) : null}
       </View>
       <View style={styles.lineBars}>
-        <HBar meter={meters.session} windowMs={SESSION_WINDOW_MS} series={s.session} dim={meters.cached || stale} now={now} styles={styles} theme={theme} />
+        {session ? (
+          <HBar meter={meters.session} windowMs={SESSION_WINDOW_MS} series={s.session} dim={meters.cached || stale} now={now} styles={styles} theme={theme} />
+        ) : null}
         <HBar meter={meters.weekly} windowMs={WEEKLY_WINDOW_MS} series={s.weekly} dim={meters.cached || stale} now={now} styles={styles} theme={theme} />
       </View>
     </Pressable>

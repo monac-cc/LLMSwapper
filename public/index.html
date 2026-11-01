@@ -170,8 +170,11 @@
 <!-- Alta por token de larga duración (claude setup-token). Mismo patrón inline que #dir-form:
      se queda en la página, se puede estilar, y Escape devuelve el foco donde estaba. El campo
      del token es type=password: no se teclea, se pega, y así no queda a la vista de nadie que
-     mire la pantalla ni lo guarda el autocompletado. -->
-<form class="field-row only-claude" id="token-form" hidden>
+     mire la pantalla ni lo guarda el autocompletado.
+     El tipo de cuenta es obligatorio: un token de setup-token no deja leer el plan, y sin él la
+     rotación no sabe si la cuenta tiene límite de 5 horas (Ultra no lo tiene). novalidate porque
+     lo comprueba app.js, en orden y con un aviso que dice por qué se pide. -->
+<form class="field-row only-claude" id="token-form" novalidate hidden>
   <label for="token-input" data-i18n="token.label">Añadir una cuenta con un token de larga duración</label>
   <div class="field-line">
     <span class="field-prefix" aria-hidden="true">token</span>
@@ -179,6 +182,13 @@
            data-i18n-ph="token.ph" aria-describedby="token-help">
     <input type="text" id="token-label" name="label" spellcheck="false" autocomplete="off"
            data-i18n-ph="token.namePh" data-i18n-aria="token.nameAria" maxlength="60">
+    <select id="token-tier" name="tier" required data-i18n-aria="tier.label">
+      <option value="" disabled selected data-i18n="tier.ph">tipo de cuenta</option>
+      <option value="free" data-i18n="tier.free">Free</option>
+      <option value="pro" data-i18n="tier.pro">Pro · 20 $</option>
+      <option value="max" data-i18n="tier.max">Max · 100 $</option>
+      <option value="ultra" data-i18n="tier.ultra">Ultra · 200 $</option>
+    </select>
     <button class="btn btn-primary" type="submit" data-i18n="token.submit">añadir</button>
     <button class="btn" type="button" id="token-cancel" data-i18n="cancel">cancelar</button>
   </div>
@@ -265,6 +275,18 @@
       <!-- Ocupa la misma celda que .name y se intercambia con él, así renombrar ocurre donde el
            nombre ya está en vez de mover la fila. -->
       <input class="name-edit" type="text" maxlength="60" spellcheck="false" autocomplete="off" hidden>
+      <!-- Solo Claude (app.js los quita en Codex). El plan va en la fila del nombre y no en una
+           columna: sin él la columna quedaría vacía en cada token sin plan indicado. Pulsarlo abre
+           la misma edición que el lápiz, con el foco en el tipo de cuenta, que se cambia aquí
+           mismo igual que el nombre. -->
+      <button class="plan" type="button"></button>
+      <select class="plan-edit" hidden>
+        <option value="" data-i18n="tier.none">sin indicar</option>
+        <option value="free" data-i18n="tier.free">Free</option>
+        <option value="pro" data-i18n="tier.pro">Pro · 20 $</option>
+        <option value="max" data-i18n="tier.max">Max · 100 $</option>
+        <option value="ultra" data-i18n="tier.ultra">Ultra · 200 $</option>
+      </select>
     </div>
 
     <div class="meter" data-kind="session">

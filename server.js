@@ -167,8 +167,14 @@ const overridingEnv = () => OVERRIDING_ENV.filter((k) => process.env[k]);
 /** Turn a set of tokens into a stored account, using the live profile as the source of truth. */
 async function adoptTokens(tokenOauth, existingUserID) {
   const { email, profile } = await oauth.fetchProfile(tokenOauth.accessToken);
-  return store.add({ email, oauth: tokenOauth, profile, userID: existingUserID || null });
+  // A full login says its plan (organizationRateLimitTier, or the rateLimitTier beside the
+  // tokens), so it is stored rather than asked. null when it says nothing: the tier on file stays.
+  const tier = store.tierFromRateLimit({ profile, oauth: tokenOauth });
+  return store.add({ email, oauth: tokenOauth, profile, userID: existingUserID || null, tier });
 }
+
+// The four plans a tier may name, as the error text lists them.
+const TIER_LIST = store.TIERS.join(', ');
 
 const BUILD = (() => {
   try { return fs.readFileSync(path.join(__dirname, '.build'), 'utf8').trim(); } catch { return ''; }
@@ -291,12 +297,18 @@ async function handleApi(req, res, url, port) {
    *   200                   -> a full-scope token. We fetch the profile and it behaves like an
    *                            imported account, except it can never be renewed.
    *   401                   -> rejected, and nothing is written.
+   *
+   * `tier` is the plan, which an inference-only token cannot reveal, so the form asks for it.
+   * Absent (or null) is "unknown" for older clients, and never erases a tier already on file.
    */
   if (pathname === '/api/accounts/token' && method === 'POST') {
     const body = await readBody(req);
     const token = typeof body.token === 'string' ? body.token.trim() : '';
     const label = typeof body.label === 'string' ? body.label.trim().slice(0, 60) : '';
     if (!token) return fail(res, 400, 'Pega un token para añadir la cuenta');
+    const tier = body.tier === undefined || body.tier === null ? null : body.tier;
+    // Refused before the probe: a typo in the plan must not spend a request or write anything.
+    if (tier !== null && !store.isTier(tier)) return fail(res, 400, `Tipo de cuenta no válido: usa ${TIER_LIST}`);
 
     try {
       const probe = await oauth.probeToken(token);
@@ -319,6 +331,7 @@ async function handleApi(req, res, url, port) {
 
       const account = store.add({
         label: label || null,
+        tier,
         email,
         profile,
         oauth: {
@@ -400,6 +413,11 @@ async function handleApi(req, res, url, port) {
       const patch = {};
       if (typeof body.label === 'string' && body.label.trim()) patch.label = body.label.trim().slice(0, 60);
       if (typeof body.color === 'string' && /^#[0-9a-f]{6}$/i.test(body.color)) patch.color = body.color;
+      // The plan picked in the panel; null clears it back to "unknown" (and to what Anthropic reports).
+      if (Object.prototype.hasOwnProperty.call(body, 'tier')) {
+        if (body.tier !== null && !store.isTier(body.tier)) return fail(res, 400, `Tipo de cuenta no válido: usa ${TIER_LIST} o null`);
+        patch.tier = body.tier;
+      }
       if (!Object.keys(patch).length) return fail(res, 400, 'Nada que actualizar');
       const updated = store.update(id, patch);
       if (!updated) return fail(res, 404, 'Cuenta no encontrada');
@@ -574,11 +592,12 @@ function listen(port) {
     setInterval(() => { if (!codexSwap.swapping()) void codexDaemon.tick().catch(() => undefined); }, 5000).unref();
 
     // Auto-rotation monitor. Cheap when idle (reads the active account's cached usage);
-    // only swaps when it has genuinely crossed the threshold. Off unless the user enabled it.
+    // only swaps when it has genuinely crossed the threshold - the week's, for an Ultra account,
+    // which has no 5-hour window. Off unless the user enabled it.
     const autoState = auto.load();
     if (autoState.enabled) console.log(`  rotación automática: ON (${autoState.target}, umbral ${autoState.threshold}%)`);
     const autoTick = () => auto.tick(deps).then((r) => {
-      if (r && r.rotated) console.log(`  rotación automática: ${r.from} -> ${r.to} (sesión ${r.at}% en ${r.target})`);
+      if (r && r.rotated) console.log(`  rotación automática: ${r.from} -> ${r.to} (${r.window === 'weekly' ? 'semana' : 'sesión'} ${r.at}% en ${r.target})`);
     }).catch((err) => console.warn(`  rotación automática: ${oauth.scrub((err && err.message) || err)}`));
     setInterval(autoTick, AUTO_EVERY_MS).unref();
   });

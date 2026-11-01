@@ -52,7 +52,24 @@ const I18N = {
     'token.get': 'ábrelo en una terminal',
     'token.getTitle': 'Abre una terminal y ejecuta claude setup-token por ti',
     'token.opened': 'Terminal abierta ({how}). Aprueba en el navegador y pega aquí el token.',
-    'token.help': 'Genéralo con <code>claude setup-token</code>: vale un año y no hace falta volver a entrar. Solo da permiso de inferencia, así que esa cuenta no podrá mostrar plan ni correo.',
+    'token.help': 'Genéralo con <code>claude setup-token</code>: vale un año y no hace falta volver a entrar. Solo da permiso de inferencia, así que no deja leer el plan ni el correo: el tipo de cuenta lo indicas tú.',
+
+    // Los cuatro planes de Claude desde el 30-10-2026, con su precio al mes. Ultra (el antiguo
+    // Max 20x) no tiene ventana de 5 horas: su fila solo lleva el medidor semanal.
+    'tier.label': 'Tipo de cuenta',
+    'tier.ph': 'tipo de cuenta',
+    'tier.none': 'sin indicar',
+    'tier.auto': 'automático ({plan})',
+    'tier.free': 'Free',
+    'tier.pro': 'Pro · 20 $',
+    'tier.max': 'Max · 100 $',
+    'tier.ultra': 'Ultra · 200 $',
+    'tier.missing': 'Elige el tipo de cuenta: con este token el panel no puede leer el plan.',
+    'tier.editAria': 'Tipo de cuenta de {name}',
+    'plan.unset': '¿plan?',
+    'plan.title': 'Plan {plan} · cambiar el tipo de cuenta de {name}',
+    'plan.titleUnset': 'Plan sin indicar · elegir el tipo de cuenta de {name}',
+    'ultra.noSession': 'sin límite de 5 h',
 
     'tabs.group': 'Entorno',
     'rescan.title': 'Buscar distros de WSL otra vez',
@@ -78,7 +95,8 @@ const I18N = {
     'swap': 'swap',
     'inUse': 'en uso',
     'swap.title': 'Poner {name} como activa en {env}',
-    'rename.title': 'Renombrar {name}',
+    'rename.title': 'Editar el nombre y el tipo de cuenta de {name}',
+    'codex.rename.title': 'Renombrar {name}',
     'remove.title': 'Quitar {name} del dashboard',
     'remove.q': '¿quitar?',
     'remove.aria': '¿Quitar {name} del dashboard?',
@@ -169,7 +187,22 @@ const I18N = {
     'token.get': 'open a terminal for me',
     'token.getTitle': 'Opens a terminal and runs claude setup-token for you',
     'token.opened': 'Terminal opened ({how}). Approve in the browser, then paste the token here.',
-    'token.help': 'Mint one with <code>claude setup-token</code>: it lasts a year and needs no further login. It only grants inference, so that account cannot show a plan or an email.',
+    'token.help': 'Mint one with <code>claude setup-token</code>: it lasts a year and needs no further login. It only grants inference, so the plan and the email cannot be read: you state the account type.',
+
+    'tier.label': 'Account type',
+    'tier.ph': 'account type',
+    'tier.none': 'not set',
+    'tier.auto': 'automatic ({plan})',
+    'tier.free': 'Free',
+    'tier.pro': 'Pro · $20',
+    'tier.max': 'Max · $100',
+    'tier.ultra': 'Ultra · $200',
+    'tier.missing': 'Pick the account type: with this token the panel cannot read the plan.',
+    'tier.editAria': 'Account type of {name}',
+    'plan.unset': 'plan?',
+    'plan.title': 'Plan {plan} · change the account type of {name}',
+    'plan.titleUnset': 'Plan not set · choose the account type of {name}',
+    'ultra.noSession': 'no 5-hour limit',
 
     'tabs.group': 'Environment',
     'rescan.title': 'Scan for WSL distros again',
@@ -195,7 +228,8 @@ const I18N = {
     'swap': 'swap',
     'inUse': 'in use',
     'swap.title': 'Make {name} active in {env}',
-    'rename.title': 'Rename {name}',
+    'rename.title': 'Edit the name and account type of {name}',
+    'codex.rename.title': 'Rename {name}',
     'remove.title': 'Remove {name} from the dashboard',
     'remove.q': 'remove?',
     'remove.aria': 'Remove {name} from the dashboard?',
@@ -515,6 +549,10 @@ function sessionNote(account) {
   return null;
 }
 
+// The badge for a tier when the server sent no plan label with it. Brand names, the same in both
+// languages; the price only goes in the selects, where it tells the four apart.
+const TIER_LABEL = { free: 'Free', pro: 'Pro', max: 'Max', ultra: 'Ultra' };
+
 function buildRow(account, target) {
   const node = tpl.content.firstElementChild.cloneNode(true);
   const usage = usageById[account.id];
@@ -528,9 +566,37 @@ function buildRow(account, target) {
 
   $('.name', node).textContent = account.label;
 
+  // The plan, next to the name. Claude only: a Codex account reads its plan off the login and has
+  // no tier to declare, so its row stays as it was.
+  const planBtn = $('.plan', node);
+  const tierSel = $('.plan-edit', node);
+  if (provider === 'claude') {
+    // account.plan is the server's label; the tier alone covers a server that sent no label.
+    const plan = account.plan || TIER_LABEL[account.tier] || null;
+    planBtn.textContent = plan || t('plan.unset');
+    planBtn.classList.toggle('is-unset', !plan);
+    planBtn.title = t(plan ? 'plan.title' : 'plan.titleUnset', { plan, name: account.label });
+    planBtn.setAttribute('aria-label', planBtn.title);
+    planBtn.addEventListener('click', () => armRename(node, account, { tierFirst: true }));
+    tierSel.setAttribute('aria-label', t('tier.editAria', { name: account.label }));
+  } else {
+    planBtn.remove();
+    tierSel.remove();
+  }
+
   const usable = usage && usage.ok ? usage : null;
   const scoped = usable ? (usable.scoped || []).map((s) => `${s.label} ${s.percent}%`).join(' · ') : '';
-  fillMeter($('.meter[data-kind="session"]', node), usable && usable.session);
+  // Ultra has no 5-hour window, only the weekly one, so its row carries the weekly meter alone.
+  // The session cell keeps its place in the grid (or the week would slide under the 5h heading)
+  // and says why it is empty; in the narrow stack it folds away (style.css, .is-weekly-only).
+  const weeklyOnly = account.tier === 'ultra';
+  const sessionEl = $('.meter[data-kind="session"]', node);
+  node.classList.toggle('is-weekly-only', weeklyOnly);
+  fillMeter(sessionEl, weeklyOnly ? null : usable && usable.session);
+  if (weeklyOnly) {
+    $('.meter-line', sessionEl).hidden = true;
+    $('.resets', sessionEl).textContent = t('ultra.noSession');
+  }
   fillMeter($('.meter[data-kind="weekly"]', node), usable && usable.weekly, scoped);
   // OpenAI can report the weekly window alone: then there is no 5-hour limit, not a missing reading.
   if (provider === 'codex' && usable && !usable.session && usable.weekly) {
@@ -577,16 +643,19 @@ function buildRow(account, target) {
 }
 
 // Active first (for THIS environment), then the least-used session: the next worth switching to.
+// An Ultra account has no session to measure, so its week stands in: the same key lib/auto.js
+// ranks the rotation queue by.
 function sortedFor(target) {
+  const used = (account) => {
+    const u = usageById[account.id];
+    const w = u && u.ok ? (account.tier === 'ultra' ? u.weekly : u.session) : null;
+    return w ? w.percent : 999;
+  };
   return [...accounts].sort((a, b) => {
     const aa = a.id === target.activeId;
     const bb = b.id === target.activeId;
     if (aa !== bb) return aa ? -1 : 1;
-    const ua = usageById[a.id];
-    const ub = usageById[b.id];
-    const pa = ua && ua.ok && ua.session ? ua.session.percent : 999;
-    const pb = ub && ub.ok && ub.session ? ub.session.percent : 999;
-    return pa - pb;
+    return used(a) - used(b);
   });
 }
 
@@ -796,40 +865,64 @@ function armRemoval(node, account) {
  * Rename in place, in the row itself - the same reasoning as the removal confirmation below it:
  * a modal would steal focus from the whole page to edit one word.
  *
- * Enter commits, Escape cancels, and losing focus commits too, because a click elsewhere after
- * typing a new name reads as "done", not as "discard what I just wrote". One AbortController owns
- * every listener, so closing by ANY of those routes drops them all - the bug the removal
- * confirmation documents in detail, and it applies here for exactly the same reason.
+ * On Claude the same edit carries the account type: the select takes the plan badge's place as the
+ * input takes the name's, so both change where they are already shown. The pencil opens it on the
+ * name, the badge on the type.
+ *
+ * Enter commits, Escape cancels, and leaving the edit commits too, because a click elsewhere after
+ * typing a new name reads as "done", not as "discard what I just wrote". Leaving means focus going
+ * to something outside the name cell, or a press outside it: moving between the name and the type
+ * is still editing. One AbortController owns every listener, so closing by ANY of those routes
+ * drops them all - the bug the removal confirmation documents in detail, and it applies here for
+ * exactly the same reason.
  */
-function armRename(node, account) {
+function armRename(node, account, { tierFirst = false } = {}) {
   // Not while a "¿quitar?" is on screen: that question owns the row, and answering it would
   // re-render this input out from under the user mid-word.
   if (openConfirm) return;
+  const who = $('.who', node);
   const nameEl = $('.name', node);
   const input = $('.name-edit', node);
+  // Absent on a Codex row (buildRow drops them): there the edit is the name alone.
+  const planEl = $('.plan', node);
+  const tierSel = $('.plan-edit', node);
   if (!input.hidden) return;
+  // Older servers send no tierDeclared: their tier is then the declared one.
+  const declared = ('tierDeclared' in account ? account.tierDeclared : account.tier) || null;
 
   const ac = new AbortController();
   const { signal } = ac;
   let settled = false;
+  // Whether the select's last change came from stepping through it with the keyboard.
+  let stepping = false;
 
   const close = () => {
     if (settled) return;
     settled = true;
     input.hidden = true;
     nameEl.hidden = false;
+    if (tierSel) { tierSel.hidden = true; planEl.hidden = false; }
     node.classList.remove('is-renaming');
     if (openConfirm === ac) openConfirm = null;
     ac.abort();
   };
 
   const commit = async () => {
+    if (settled) return;
+    const body = {};
+    // An emptied name keeps the old one; each field goes only if it changed.
     const label = input.value.trim();
+    if (label && label !== account.label) body.label = label;
+    if (tierSel) {
+      // '' clears the declared tier (null): back to what Anthropic reports, or to unknown.
+      const tier = tierSel.value || null;
+      if (tier !== declared) body.tier = tier;
+    }
     // Nothing typed, or nothing changed: closing quietly beats a toast saying nothing happened.
-    if (!label || label === account.label) { close(); return; }
+    if (!Object.keys(body).length) { close(); return; }
     close();
     try {
-      await api(`${API()}/accounts/${account.id}`, { method: 'PATCH', body: { label } });
+      await api(`${API()}/accounts/${account.id}`, { method: 'PATCH', body });
       await refresh(false);
     } catch (err) {
       toast(err.message, 'err');
@@ -839,18 +932,56 @@ function armRename(node, account) {
   input.value = account.label;
   nameEl.hidden = true;
   input.hidden = false;
+  if (tierSel) {
+    // The empty option is "automático (Ultra)" when Anthropic reports the plan: choosing it then
+    // visibly differs from declaring one, instead of a "sin indicar" that changes nothing.
+    const auto = !declared && account.tier ? TIER_LABEL[account.tier] : null;
+    const none = tierSel.querySelector('option[value=""]');
+    if (none) none.textContent = auto ? t('tier.auto', { plan: auto }) : t('tier.none');
+    tierSel.value = declared || '';
+    planEl.hidden = true;
+    tierSel.hidden = false;
+  }
   node.classList.add('is-renaming');
   // Same slot as the removal confirmation: it marks "this row has an inline interaction open",
   // which render() aborts before replacing the node, and which the hotkeys must not talk over.
   openConfirm = ac;
-  input.focus();
-  input.select();
+  if (tierSel && tierFirst) {
+    tierSel.focus();
+    // The badge was pressed to change the type, so the list opens at once where the browser
+    // can. Where it cannot (no showPicker for selects, or no user activation) it throws, and the
+    // focused select is the fallback: one more press opens it.
+    try { tierSel.showPicker(); } catch { /* focus is enough */ }
+  } else {
+    input.focus();
+    input.select();
+  }
 
-  input.addEventListener('keydown', (e) => {
+  who.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { e.stopPropagation(); close(); }
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
   }, { signal });
-  input.addEventListener('blur', commit, { signal });
+  // A pick from the open list IS the answer, so it commits. Stepping through a closed select with
+  // the arrows (or typing a letter) changes it too, one step at a time, and sending every step
+  // would save a plan nobody chose: those wait for Enter or for leaving, like the name does.
+  if (tierSel) {
+    // Alt+Down and Space open the list instead of stepping, and so does a press with the pointer.
+    tierSel.addEventListener('keydown', (e) => {
+      stepping = (e.key.startsWith('Arrow') && !e.altKey) || ['Home', 'End', 'PageUp', 'PageDown'].includes(e.key)
+        || (e.key.length === 1 && e.key !== ' ');
+    }, { signal });
+    tierSel.addEventListener('pointerdown', () => { stepping = false; }, { signal });
+    tierSel.addEventListener('change', () => { if (!stepping) commit(); }, { signal });
+  }
+  // No relatedTarget is focus going nowhere - the window lost it, or a click landed on a select
+  // this browser does not focus - and the press below decides those instead.
+  who.addEventListener('focusout', (e) => {
+    if (e.relatedTarget && !who.contains(e.relatedTarget)) commit();
+  }, { signal });
+  // Deferred, like the removal's: the press that opened the edit must not be the one closing it.
+  setTimeout(() => document.addEventListener('pointerdown', (e) => {
+    if (!who.contains(e.target)) commit();
+  }, { capture: true, signal }), 0);
 }
 
 async function doSwap(id, targetId, button) {
@@ -886,12 +1017,15 @@ async function doSwap(id, targetId, button) {
  * Add an account from a pasted long-lived token. Returns whether it landed, so the caller can
  * decide about the form: on success it is emptied and closed, on failure the value stays put so
  * a mistyped NAME does not cost the user another trip to the terminal for the token.
+ *
+ * `tier` is the plan the user picked: such a token cannot reveal it, and whether the account has a
+ * 5-hour window at all (Ultra has none) depends on it.
  */
-async function addByToken(token, label) {
+async function addByToken(token, label, tier) {
   const buttons = [$('#btn-add-token'), $('#btn-add-token-empty')].filter(Boolean);
   buttons.forEach((b) => { b.disabled = true; b.classList.add('is-loading'); });
   try {
-    const result = await api('/api/accounts/token', { method: 'POST', body: { token, label } });
+    const result = await api('/api/accounts/token', { method: 'POST', body: { token, label, tier } });
     toast(t('toast.added', { name: result.account.label }), 'ok');
     for (const w of result.warnings || []) toast(w);
     await refresh(false);
@@ -1093,6 +1227,7 @@ dirInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDirFi
 const tokenForm = $('#token-form');
 const tokenInput = $('#token-input');
 const tokenLabelInput = $('#token-label');
+const tokenTierInput = $('#token-tier');
 
 function openTokenField() {
   closeTokenField({ focusBack: false }); // no-op if it was closed; clears any half-typed token
@@ -1110,6 +1245,9 @@ function closeTokenField({ focusBack = true } = {}) {
   // for as long as the tab stays open.
   tokenInput.value = '';
   tokenLabelInput.value = '';
+  // Back to "tipo de cuenta", not to the last pick: every token is a new answer.
+  tokenTierInput.selectedIndex = 0;
+  tokenTierInput.removeAttribute('aria-invalid');
   if (!focusBack || !wasOpen) return;
   const back = $('#btn-add-token') || $('#btn-add-token-empty');
   if (back) back.focus();
@@ -1119,13 +1257,22 @@ tokenForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   const token = tokenInput.value.trim();
   if (!token) { tokenInput.focus(); return; }
-  if (await addByToken(token, tokenLabelInput.value.trim())) closeTokenField();
+  // Required, and said why: an empty token explains itself, an unpicked type does not.
+  const tier = tokenTierInput.value;
+  if (!tier) {
+    tokenTierInput.setAttribute('aria-invalid', 'true');
+    tokenTierInput.focus();
+    toast(t('tier.missing'), 'err');
+    return;
+  }
+  if (await addByToken(token, tokenLabelInput.value.trim(), tier)) closeTokenField();
   else tokenInput.focus();
 });
+tokenTierInput.addEventListener('change', () => tokenTierInput.removeAttribute('aria-invalid'));
 $('#token-cancel').addEventListener('click', closeTokenField);
 const btnGetToken = $('#btn-get-token');
 btnGetToken.addEventListener('click', () => getTokenInTerminal(btnGetToken));
-for (const el of [tokenInput, tokenLabelInput]) {
+for (const el of [tokenInput, tokenLabelInput, tokenTierInput]) {
   el.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeTokenField(); });
 }
 $('#btn-add-token').addEventListener('click', openTokenField);

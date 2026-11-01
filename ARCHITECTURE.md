@@ -289,6 +289,7 @@ is already user-scoped.
 
     { "version": 1, "activeId": "acc_ab12cd", "accounts": [ {
       "id": "acc_ab12cd", "label": "...", "color": "#7c5cff", "email": "you@example.com",
+      "tier": "ultra",
       "oauth": { ...the claudeAiOauth shape... },
       "profile": { ...the oauthAccount block... },
       "userID": null, "addedAt": 0, "lastSwappedAt": null } ] }
@@ -296,6 +297,28 @@ is already user-scoped.
 Ids derive from `accountUuid`, so re-importing an account updates it instead of duplicating.
 Mode 0600, plus an NTFS ACL on Windows where chmod is a no-op. `store.publicView()` is the
 only shape allowed to reach the browser; it strips `oauth` and `userID`.
+
+### The plan: `tier`
+
+`tier` is `"free" | "pro" | "max" | "ultra"` or `null` (unknown), in the names Anthropic gave its
+plans on 2026-10-30: Free, Pro ($20), Max ($100, formerly "Max 5x", 5-hour **and** weekly limits)
+and Ultra ($200, formerly "Max 20x": a verified account has **no 5-hour limit**, only the weekly
+one). Claude accounts only; Codex keeps its own `plan`.
+
+- **Where it comes from.** A `claude setup-token` token has no profile, so its plan cannot be read:
+  the paste form asks for it and the row can change it later (`PATCH`). An import derives it with
+  `store.tierFromRateLimit`, from the profile's `organizationRateLimitTier` or the `rateLimitTier`
+  stored beside the tokens - the strings kept their old names, so `max_20x` is `ultra`, `max_5x`
+  is `max` and `pro` is `pro`. A re-import that reports nothing leaves the tier on file alone.
+- **It is never erased by omission.** `store.add` ignores a missing, null or unknown tier, like a
+  null label: re-pasting the same token from a client that does not send one (an older panel, the
+  Paseo importer reading an old export) keeps the plan the user picked. Only `PATCH {tier: null}`
+  clears it.
+- **What is served.** `publicView().tier` is `store.effectiveTier`: the stored tier, else
+  `tierFromRateLimit`, else `null`. `plan` is its label (`Free`/`Pro`/`Max`/`Ultra`) and, without
+  one, the old derivation under the new names (`Max 20x` now reads `Ultra`, `Max 5x` reads `Max`).
+- **What it changes.** For an Ultra account the panel shows only the weekly meter, the skills print
+  `—` in the 5h column, and automatic rotation watches the week (below).
 
 ---
 
@@ -311,11 +334,11 @@ only shape allowed to reach the browser; it strips `oauth` and `userID`.
 | POST | `/api/swap` | `{id, target?}` -> `{ok, verified, target, warnings[], backup, account}` - 400 for a target that does not resolve, 409 while another swap is in flight |
 | POST | `/api/swap/dryrun` | `{id, target?}` -> what would change, writes nothing |
 | POST | `/api/accounts/import` | `{configDir?, target?}` -> `{ok, account}` |
-| POST | `/api/accounts/token` | `{token, label?}` -> `{ok, kind, warnings[], account}` - paste a long-lived token |
+| POST | `/api/accounts/token` | `{token, label?, tier?}` -> `{ok, kind, warnings[], account}` - paste a long-lived token. `tier` is one of `free`/`pro`/`max`/`ultra` (400 otherwise, before any network call); absent or null is unknown and keeps a tier already stored |
 | POST | `/api/token/terminal` | `{}` -> `{ok, how}` - opens a terminal running `claude setup-token`; 409 in a container or without the CLI |
-| PATCH | `/api/accounts/:id` | `{label?, color?}` |
+| PATCH | `/api/accounts/:id` | `{label?, color?, tier?}` -> `{ok, account}` - `tier` one of the four or `null` (clears it); anything else is 400 and changes nothing |
 | DELETE | `/api/accounts/:id` | `{ok}` |
-| GET | `/api/auto` | `{enabled, target, threshold, current, next, queue[]}` - cached readings only, spends nothing |
+| GET | `/api/auto` | `{enabled, target, threshold, current, next, queue[]}` - cached readings only, spends nothing. Each entry: `{id, label, email, tier, sessionPercent, weeklyPercent, sessionResetsAt, weeklyResetsAt}`, queue entries add `eligible, reason, role` |
 | POST | `/api/auto` | `{enabled?, target?, threshold?}` -> the same status |
 
 `target` defaults to `host`. Usage is target-independent (the token is the same in any
@@ -325,12 +348,26 @@ environment), so `/api/usage*` take no target.
 
 `lib/auto.js` is an on/off monitor, off by default, its state persisted to `data/auto.json`.
 When on, a 3-minute interval reads the active account's usage — cache-gated, so a real API call
-only every ~4 min — and does nothing until the 5-hour session crosses the threshold (default
-90%). Only then does it sweep the other accounts to rank them, and swap to the freshest one that
+only every ~4 min — and does nothing until the 5-hour session (the week, on an Ultra account)
+crosses the threshold (default 90%). Only then does it sweep the other accounts to rank them, and swap to the freshest one that
 has room in **both** windows below the threshold; if none qualifies it stays put. A cooldown
 (5 min) after any rotation stops it swapping twice while readings lag. A rotation that fails arms the same cooldown, and an account whose last reading was a 401/403 is excluded from the queue as `token rechazado`, so a dead credential is never retried every tick. Swaps are serialised: a second `swapTo` while one is in flight - a manual one overlapping the monitor - is refused with 409 rather than interleaved. The swap is the ordinary
 `swap.swapTo` path — backup, verify, roll back — so "when" is the only thing this module decides;
 "how" is unchanged. The three `/swapper*` skills (`skills/`) are thin clients of these endpoints.
+
+**Ultra accounts** (effective `tier` `"ultra"`, see "The plan") have no 5-hour window, so the week
+is what runs out:
+
+- **Trigger.** When the active account is Ultra, the monitor rotates on its **weekly** percent
+  reaching the threshold, not the session's. `tick()` reports which one fired (`window:
+  "session" | "weekly"`, `at`), and the server log names it.
+- **Eligibility.** Unchanged in substance: an Ultra candidate is excluded by its week at or over
+  the threshold, or by a session reading at or over it if one is really there - an account still
+  in verification can carry a temporary 5-hour limit. An absent window reads 0% (`usage.meter`),
+  so it never blocks one.
+- **Order.** Ultra candidates sort by their weekly percent, every other account by its session,
+  in the same ladder. Cooldown, serialisation and the shape of the status are untouched; each
+  status entry carries `tier` so a client can print `—` instead of a meaningless 5-hour 0%.
 
 `overridingEnv` lists any of `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and
 `CLAUDE_CODE_OAUTH_TOKEN` that are set. Each of them outranks the credentials file this app
