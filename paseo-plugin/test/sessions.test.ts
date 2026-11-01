@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { createActiveWatch, hostActiveId } from "../server/active-watch.ts";
 import { createHandlers } from "../server/handlers.ts";
 import { resolveCli } from "../server/paseo-cli.ts";
-import { createQuietRunner, parseQuietOutput, type QuietRun } from "../server/quiet-helper.ts";
-import { CHECK_FAILED_NOTE, MAX_WAIT_MS, NO_HELPER_NOTE, createSessionRefresher } from "../server/session-refresh.ts";
+import { createQuietRunner, parseQuietOutput, type QuietMode, type QuietRoundOptions, type QuietRun } from "../server/quiet-helper.ts";
+import { CHECK_FAILED_NOTE, CHECK_FAILED_STOP_NOTE, MAX_WAIT_MS, NO_HELPER_NOTE, type SessionsSummary, createSessionRefresher } from "../server/session-refresh.ts";
 import type { ExecResults } from "../shared/exec.ts";
 import { swapNoticeLines } from "../shared/swap-notice.ts";
 import type { SwapView } from "../shared/views.ts";
@@ -15,15 +15,19 @@ const C = "8802dc9f-a4b3-45e3-8443-4aff46f96398";
 
 /**
  * Fake quiet helper. `state`: per live agent, "quiet", "sin-proceso" or the busy reason ("turno",
- * "subagentes", "segundo-plano"); agents not in it are gone. Like the real one, "reload" re-checks each agent.
+ * "subagentes", "segundo-plano", "sin-visibilidad"); agents not in it are gone. Like the real one, "reload"
+ * re-checks each agent, and "stop" stops and continues the working ones.
  */
 function fakeQuiet(state: Record<string, string>, opts: { delayMs?: number } = {}) {
   const calls: { mode: string; ids: readonly string[] | "all" }[] = [];
   const reloads: string[] = [];
+  const stops: string[] = [];
   let inFlight = 0, maxInFlight = 0;
-  const ctl = { fail: null as string | null, beforeReload: null as (() => void) | null };
-  const run = async (mode: "check" | "reload", ids: readonly string[] | "all"): Promise<QuietRun> => {
+  const ctl = { fail: null as string | null, beforeReload: null as (() => void) | null, clock: () => Date.now() };
+  const actedAt = new Map<string, number>();
+  const run = async (mode: QuietMode, ids: readonly string[] | "all", round: QuietRoundOptions = {}): Promise<QuietRun> => {
     calls.push({ mode, ids });
+    const waitOnly = new Set(round.waitOnly ?? []);
     inFlight++;
     maxInFlight = Math.max(maxInFlight, inFlight);
     try {
@@ -35,23 +39,27 @@ function fakeQuiet(state: Record<string, string>, opts: { delayMs?: number } = {
         const st = state[id];
         if (st === undefined) results.set(id, "gone");
         else if (st === "sin-proceso") results.set(id, st);
+        else if (mode === "stop" && !waitOnly.has(id) && ["turno", "subagentes", "segundo-plano"].includes(st)) { stops.push(id); actedAt.set(id, ctl.clock()); results.set(id, "stopped"); state[id] = "turno"; } // continuing, on the new account
         else if (st !== "quiet") results.set(id, `busy:${st}`);
         else if (mode === "check") results.set(id, "quiet");
-        else { reloads.push(id); results.set(id, "reloaded"); state[id] = "sin-proceso"; } // Paseo starts the next process at the next turn
+        else { reloads.push(id); actedAt.set(id, ctl.clock()); results.set(id, "reloaded"); state[id] = "sin-proceso"; } // Paseo starts the next process at the next turn
       }
-      return { results, error: null };
+      return { results, error: null, actedAt: new Map([...actedAt].filter(([k]) => results.has(k))) };
     } finally { inFlight--; }
   };
-  return { run, calls, reloads, ctl, maxInFlight: () => maxInFlight };
+  return { run, calls, reloads, stops, ctl, maxInFlight: () => maxInFlight };
 }
-const silent = { log: () => undefined, sleep: async () => undefined };
+/** The tests below this line until "stop and continue" are about the "wait" mode. */
+const silent = { log: () => undefined, sleep: async () => undefined, busySessions: async () => "wait" as const };
+/** A summary without the mode it was made under (checked on its own). */
+const summary = ({ mode: _mode, ...rest }: SessionsSummary) => rest;
 
 test("apply reloads the quiet agents now and defers the busy ones", async () => {
   const q = fakeQuiet({ [A]: "quiet", [B]: "turno" });
   const r = createSessionRefresher({ quiet: q.run, ...silent });
   const s = await r.apply();
   await r.idle();
-  assert.deepEqual(s, { reloading: 1, deferred: 1, note: null });
+  assert.deepEqual(summary(s), { reloading: 1, stopped: 0, deferred: 1, unseen: 0, unchecked: 0, note: null });
   assert.deepEqual(q.reloads, [A]);
   assert.deepEqual(r.pendingAgents(), [B]);
   assert.deepEqual(q.calls[0], { mode: "check", ids: "all" }, "every live Claude agent of the daemon");
@@ -82,6 +90,7 @@ test("the watch and the panel reporting the same change share one round", async 
   let t = 1000;
   const state: Record<string, string> = { [A]: "quiet" };
   const q = fakeQuiet(state);
+  q.ctl.clock = () => t;
   const r = createSessionRefresher({ quiet: q.run, ...silent, now: () => t });
   const [x, y] = await Promise.all([r.apply(), r.apply()]);
   assert.equal(x, y);
@@ -98,7 +107,7 @@ test("without the helper nothing runs and the note says so", async () => {
   const r = createSessionRefresher({ quiet: null, ...silent });
   const s = await r.apply();
   await r.recheck();
-  assert.deepEqual(s, { reloading: 0, deferred: 0, note: NO_HELPER_NOTE });
+  assert.deepEqual(summary(s), { reloading: 0, stopped: 0, deferred: 0, unseen: 0, unchecked: 0, note: NO_HELPER_NOTE });
   assert.equal(createQuietRunner(resolveCli("/usr/bin/node", "linux", () => false, undefined)), null, "bare paseo on PATH: no daemon client to ask");
 });
 
@@ -165,11 +174,11 @@ test("handlers attach the session summary to a successful swap, and a failing se
   const ok = createHandlers(async () => 7373, async () => swapResult("host"), Date.now, async (s, budgetMs) => {
     seen.push(s.target);
     budgets.push(budgetMs);
-    return { reloading: 2, deferred: 1, note: null };
+    return { reloading: 2, stopped: 0, deferred: 1, unseen: 0, unchecked: 0, note: null };
   });
   const r = await ok.swap({ accountId: "acc_222222", target: "host" });
   assert.ok(r.ok);
-  assert.deepEqual(r.data.sessions, { reloading: 2, deferred: 1, note: null });
+  assert.deepEqual(r.data.sessions, { reloading: 2, stopped: 0, deferred: 1, unseen: 0, unchecked: 0, note: null });
   assert.deepEqual(seen, ["host"]);
   assert.ok(budgets[0] > 26_000 && budgets[0] <= 27_000, `the summary gets what is left of Paseo's 30 s RPC: ${budgets[0]}`);
   const broken = createHandlers(async () => 7373, async () => swapResult("host"), Date.now, async () => { throw new Error("cli crashed"); });
@@ -185,13 +194,14 @@ const view = (over: Partial<SwapView>): SwapView => ({
 });
 
 test("notice: LLMswapper's 'sesiones NUEVAS' is replaced by what really happens", () => {
-  const host = swapNoticeLines(view({ sessions: { reloading: 2, deferred: 1, note: null } }));
+  const host = swapNoticeLines(view({ sessions: { reloading: 2, stopped: 0, deferred: 1, unseen: 0, unchecked: 0, note: null } }));
   assert.ok(!host.some((l) => /NUEVAS/.test(l)));
-  assert.ok(host.some((l) => /2 sesiones de Paseo se recargan ya y 1 sesión cuando termine lo que está haciendo, también en segundo plano/.test(l)), host.join(" | "));
+  assert.ok(host.some((l) => /^2 sesiones de Paseo se recargan ya: conservan la conversación y siguen con la cuenta nueva\.$/.test(l)), host.join(" | "));
+  assert.ok(host.some((l) => /^1 sesión sigue con la cuenta anterior hasta que termine lo que está haciendo, también en segundo plano; después cambia sola\.$/.test(l)), host.join(" | "));
   assert.ok(host.some((l) => /fuera de Paseo/.test(l)));
   const wsl = swapNoticeLines(view({ target: "wsl:Ubuntu", targetLabel: "Ubuntu" }));
   assert.ok(wsl.some((l) => /Ubuntu \(3 procesos\).*claude -c/.test(l)), wsl.join(" | "));
-  const none = swapNoticeLines(view({ warnings: [], sessions: { reloading: 0, deferred: 0, note: null } }));
+  const none = swapNoticeLines(view({ warnings: [], sessions: { reloading: 0, stopped: 0, deferred: 0, unseen: 0, unchecked: 0, note: null } }));
   assert.deepEqual(none, ["Ninguna sesión de Paseo tenía Claude en marcha: la próxima vez que escribas en una, ya irá con la cuenta nueva."]);
 });
 
@@ -203,7 +213,7 @@ test("background work is waited for: subagents or a background shell keep the ag
   const r = createSessionRefresher({ quiet: q.run, ...silent });
   const s = await r.apply();
   await r.idle();
-  assert.deepEqual(s, { reloading: 1, deferred: 2, note: null });
+  assert.deepEqual(summary(s), { reloading: 1, stopped: 0, deferred: 2, unseen: 0, unchecked: 0, note: null });
   assert.deepEqual(q.reloads, [C], "nothing is cut");
   await r.recheck(); // still working
   await r.idle();
@@ -250,9 +260,9 @@ test("a failed check reloads nothing, says so, and retries every agent later", a
   const logs: string[] = [];
   const q = fakeQuiet({ [A]: "quiet", [B]: "turno" });
   q.ctl.fail = "connect: ECONNREFUSED";
-  const r = createSessionRefresher({ quiet: q.run, log: (m) => logs.push(m), sleep: async () => undefined });
+  const r = createSessionRefresher({ quiet: q.run, log: (m) => logs.push(m), sleep: async () => undefined, busySessions: async () => "wait" as const });
   const s = await r.apply();
-  assert.deepEqual(s, { reloading: 0, deferred: 0, note: CHECK_FAILED_NOTE });
+  assert.deepEqual(summary(s), { reloading: 0, stopped: 0, deferred: 0, unseen: 0, unchecked: 0, note: CHECK_FAILED_NOTE });
   await r.recheck();
   await r.idle();
   assert.equal(logs.filter((l) => /ECONNREFUSED/.test(l)).length, 1, "the same error is logged once");
@@ -269,7 +279,7 @@ test("an agent that stays busy for 12 h is let go, with a log line", async () =>
   let t = 0;
   const logs: string[] = [];
   const q = fakeQuiet({ [A]: "segundo-plano" });
-  const r = createSessionRefresher({ quiet: q.run, log: (m) => logs.push(m), sleep: async () => undefined, now: () => t });
+  const r = createSessionRefresher({ quiet: q.run, log: (m) => logs.push(m), sleep: async () => undefined, busySessions: async () => "wait" as const, now: () => t });
   await r.apply();
   t += MAX_WAIT_MS - 60_000;
   await r.recheck();
@@ -288,8 +298,9 @@ test("an agent that stays busy for 12 h is let go, with a log line", async () =>
 test("helper output is parsed defensively, and what was settled before a failure is kept", () => {
   const lines = (...o: unknown[]) => o.map((x) => JSON.stringify(x)).join("\n");
   const r = parseQuietOutput(`noise\n${lines({ id: A, r: "reloaded" }, { id: B, r: "busy:segundo-plano" }, { id: "not-an-id", r: "quiet" }, { id: C, r: 3 }, { done: true })}\n`);
-  assert.deepEqual(r, { results: new Map([[A, "reloaded"], [B, "busy:segundo-plano"]]), error: null });
-  assert.deepEqual(parseQuietOutput(lines({ error: "connect: no daemon" })), { results: new Map(), error: "connect: no daemon" });
+  assert.deepEqual(r, { results: new Map([[A, "reloaded"], [B, "busy:segundo-plano"]]), error: null, actedAt: new Map() });
+  assert.deepEqual(parseQuietOutput(lines({ beat: true }, { id: A, r: "stopped", at: 1234 }, { done: true })).actedAt, new Map([[A, 1234]]), "when it acted; heartbeats are ignored");
+  assert.deepEqual(parseQuietOutput(lines({ error: "connect: no daemon" })), { results: new Map(), error: "connect: no daemon", actedAt: new Map() });
   const cut = parseQuietOutput(lines({ id: A, r: "reloaded" })); // killed before {done}
   assert.deepEqual([...cut.results], [[A, "reloaded"]]);
   assert.ok(cut.error);
@@ -301,7 +312,7 @@ test("sessions without a live Claude Code process are neither reloaded nor waite
   const r = createSessionRefresher({ quiet: q.run, ...silent });
   const s = await r.apply();
   await r.idle();
-  assert.deepEqual(s, { reloading: 0, deferred: 1, note: null });
+  assert.deepEqual(summary(s), { reloading: 0, stopped: 0, deferred: 1, unseen: 0, unchecked: 0, note: null });
   assert.deepEqual(q.reloads, []);
   assert.deepEqual(r.pendingAgents(), [B]);
 });
@@ -310,7 +321,7 @@ test("a reload round that dies half-way keeps what it settled: nobody is reloade
   const q = fakeQuiet({ [A]: "quiet", [B]: "quiet" });
   const real = q.run;
   let cut = true;
-  const run = async (mode: "check" | "reload", ids: readonly string[] | "all"): Promise<QuietRun> => {
+  const run = async (mode: QuietMode, ids: readonly string[] | "all"): Promise<QuietRun> => {
     const r = await real(mode, ids);
     if (mode !== "reload" || !cut) return r;
     cut = false;
@@ -332,11 +343,12 @@ test("a round that started before a newer swap does not settle that swap's waits
   let release: () => void = () => undefined;
   const gate = new Promise<void>((r) => { release = r; });
   let gated = true;
-  const run = async (mode: "check" | "reload", ids: readonly string[] | "all"): Promise<QuietRun> => {
+  const run = async (mode: QuietMode, ids: readonly string[] | "all"): Promise<QuietRun> => {
     if (mode === "reload" && gated) { gated = false; const r = await q.run(mode, ids); await gate; return r; } // reloads, then reports late
     return q.run(mode, ids);
   };
   let t = 0;
+  q.ctl.clock = () => t; // round 1 reloads at t=0, before swap 2
   const r = createSessionRefresher({ quiet: run, ...silent, now: () => t });
   await r.apply(); // round 1 reloads A and B, and is slow to report
   state[A] = "turno"; // you write to A: a new process, on the account of swap 1
@@ -357,7 +369,7 @@ test("a check that fails while an older catch-up round runs is still owed its ow
   let release: () => void = () => undefined;
   const gate = new Promise<void>((r) => { release = r; });
   let reloads = 0;
-  const run = async (mode: "check" | "reload", ids: readonly string[] | "all"): Promise<QuietRun> => {
+  const run = async (mode: QuietMode, ids: readonly string[] | "all"): Promise<QuietRun> => {
     if (mode === "check") return { results: new Map(), error: "connect: ECONNREFUSED" };
     reloads++;
     if (reloads === 1) await gate; // the first catch-up round is slow, and works
@@ -383,7 +395,7 @@ test("the swap does not wait behind a reload round, nor for a check that hangs",
   let release: () => void = () => undefined;
   const gate = new Promise<void>((r) => { release = r; });
   let hang = false;
-  const run = async (mode: "check" | "reload", ids: readonly string[] | "all"): Promise<QuietRun> => {
+  const run = async (mode: QuietMode, ids: readonly string[] | "all"): Promise<QuietRun> => {
     if (mode === "reload") await gate; // a long reload round (one agent restarts in ~10 s)
     if (mode === "check" && hang) return new Promise<QuietRun>(() => undefined);
     return q.run(mode, ids);
@@ -409,4 +421,260 @@ test("CLI resolution: npm nests the server inside the CLI package (homelab, nvm 
   const c = resolveCli("/usr/bin/node", "linux", (p) => p === `${root}/dist/index.js`, entry);
   assert.equal(c?.cliIndex, `${root}/dist/index.js`);
   assert.deepEqual(c?.node, { command: "/usr/bin/node", env: {} });
+});
+
+// --- stop and continue (the default): the old account spends nothing more ---
+
+test("by default a swap stops working sessions at once and has them continue on the new account", async () => {
+  const D = "11ec2c5f-0640-4ce0-a037-6f86b8ec5871";
+  const E = "50aa64c2-1111-4222-8333-444455556666";
+  const q = fakeQuiet({ [A]: "quiet", [B]: "subagentes", [C]: "segundo-plano", [D]: "sin-proceso", [E]: "sin-visibilidad" });
+  const r = createSessionRefresher({ quiet: q.run, log: () => undefined, sleep: async () => undefined }); // no setting: the default
+  const s = await r.apply();
+  await r.idle();
+  assert.deepEqual(summary(s), { reloading: 1, stopped: 2, deferred: 0, unseen: 1, unchecked: 0, note: null });
+  assert.deepEqual(q.calls[1], { mode: "stop", ids: [A, B, C] }, "one round: quiet ones reloaded, working ones stopped");
+  assert.deepEqual(q.reloads, [A]);
+  assert.deepEqual(q.stops, [B, C]);
+  assert.deepEqual(r.pendingAgents(), [], "what cannot be seen is never stopped blind, nor retried every minute: the panel says it keeps the old account");
+});
+
+test("the setting is read at every round: switching to wait lets working sessions finish first", async () => {
+  let mode: "stop" | "wait" = "wait";
+  const state: Record<string, string> = { [A]: "turno" };
+  const q = fakeQuiet(state);
+  let t = 0;
+  const r = createSessionRefresher({ quiet: q.run, log: () => undefined, sleep: async () => undefined, now: () => t, busySessions: async () => mode });
+  const s = await r.apply();
+  await r.idle();
+  assert.deepEqual(summary(s), { reloading: 0, stopped: 0, deferred: 1, unseen: 0, unchecked: 0, note: null });
+  assert.deepEqual(q.stops, []);
+  mode = "stop";
+  await r.recheck(); // still owed: the next round follows the new setting
+  await r.idle();
+  assert.deepEqual(q.stops, [A]);
+  assert.deepEqual(r.pendingAgents(), []);
+});
+
+test("a session stopped but not told to continue is settled, and the log says to write to it", async () => {
+  const logs: string[] = [];
+  const run = async (mode: QuietMode, ids: readonly string[] | "all"): Promise<QuietRun> =>
+    mode === "check" ? { results: new Map([[A, "busy:turno"]]), error: null } : { results: new Map([[A, "stopped-sin-aviso:timeout"]]), error: null };
+  const r = createSessionRefresher({ quiet: run, log: (m) => logs.push(m), sleep: async () => undefined });
+  await r.apply();
+  await r.idle();
+  assert.deepEqual(r.pendingAgents(), []);
+  assert.ok(logs.some((l) => /6acdee01.*escríbele «sigue»/.test(l)), logs.join(" | "));
+});
+
+test("notice: stopped sessions are announced, and the old account is said to spend nothing more", () => {
+  const lines = swapNoticeLines(view({ warnings: [], sessions: { reloading: 1, stopped: 2, deferred: 1, unseen: 0, unchecked: 0, note: null } }));
+  assert.deepEqual(lines, [
+    "1 sesión de Paseo se recarga ya y 2 sesiones con trabajo en marcha se paran y lo retoman: conservan la conversación y siguen con la cuenta nueva.",
+    "1 sesión sigue con la cuenta anterior hasta que termine lo que está haciendo, también en segundo plano; después cambia sola.",
+    "Lo que se cortó en las sesiones paradas sigue con la cuenta nueva, y sus workflows se reanudan sin repetir los pasos terminados.",
+  ]);
+  const old = swapNoticeLines(view({ warnings: [], sessions: { reloading: 0, deferred: 0, note: null } as unknown as SwapView["sessions"] }));
+  assert.equal(old.length, 1, "a host before 0.1.4 sends no `stopped`: read as 0");
+});
+
+test("notice: one session takes the singular, and only with nothing left behind does the old account stop spending", () => {
+  assert.deepEqual(swapNoticeLines(view({ warnings: [], sessions: { reloading: 0, stopped: 1, deferred: 0, unseen: 0, unchecked: 0, note: null } })), [
+    "1 sesión con trabajo en marcha se para y lo retoma: conserva la conversación y sigue con la cuenta nueva.",
+    "Las sesiones de Paseo de este equipo ya no gastan de la cuenta anterior: lo que se cortó sigue con la nueva, y los workflows se reanudan sin repetir los pasos terminados.",
+  ]);
+  assert.deepEqual(swapNoticeLines(view({ warnings: [], sessions: { reloading: 1, stopped: 0, deferred: 0, unseen: 0, unchecked: 0, note: null } })), [
+    "1 sesión de Paseo se recarga ya: conserva la conversación y sigue con la cuenta nueva.",
+  ]);
+});
+
+test("stop mode: delegated, loading and session-less agents wait instead of being stopped", async () => {
+  const q = fakeQuiet({ [A]: "delegado", [B]: "cargando", [C]: "sin-sesion" });
+  const r = createSessionRefresher({ quiet: q.run, log: () => undefined, sleep: async () => undefined });
+  const s = await r.apply();
+  await r.idle();
+  assert.deepEqual(summary(s), { reloading: 0, stopped: 0, deferred: 3, unseen: 0, unchecked: 0, note: null });
+  assert.deepEqual(q.stops, []);
+  assert.deepEqual(r.pendingAgents().sort(), [A, B, C].sort());
+});
+
+test("stop mode: a failed check says the work is being handled in the background, not that sessions keep the old account", async () => {
+  const q = fakeQuiet({ [A]: "turno" });
+  q.ctl.fail = "la comprobación tardó demasiado";
+  const r = createSessionRefresher({ quiet: q.run, log: () => undefined, sleep: async () => undefined });
+  assert.equal((await r.apply()).note, CHECK_FAILED_STOP_NOTE);
+  await r.idle();
+});
+
+test("after a failed check, an 'all' round queued behind the catch-up round does not stop everyone twice", async () => {
+  const state: Record<string, string> = { [A]: "turno", [B]: "subagentes" };
+  const q = fakeQuiet(state);
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((res) => { release = res; });
+  let first = true;
+  const run = async (mode: QuietMode, ids: readonly string[] | "all"): Promise<QuietRun> => {
+    if (mode === "check") return { results: new Map(), error: "connect: ECONNREFUSED" };
+    if (first) { first = false; await gate; } // the catch-up round is slow; a turn end and a tick arrive meanwhile
+    return q.run(mode, ids);
+  };
+  const r = createSessionRefresher({ quiet: run, log: () => undefined, sleep: async () => undefined });
+  await r.apply();
+  const extra = [r.onTurnEnded(A), r.recheck()];
+  await new Promise((res) => setTimeout(res, 10));
+  release();
+  await Promise.all(extra);
+  await r.idle();
+  assert.deepEqual(q.stops.sort(), [A, B].sort(), "each agent stopped once");
+  assert.ok(q.calls.filter((c) => c.ids === "all").length === 1, JSON.stringify(q.calls));
+});
+
+test("a stop made after a newer swap began settles that swap too: the agent is not stopped twice", async () => {
+  let t = 0;
+  const state: Record<string, string> = { [A]: "subagentes" };
+  const q = fakeQuiet(state);
+  q.ctl.clock = () => t;
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((res) => { release = res; });
+  let first = true;
+  const run = async (mode: QuietMode, ids: readonly string[] | "all"): Promise<QuietRun> => {
+    if (mode !== "check" && first) { first = false; await gate; } // swap 1's round is queued behind other agents
+    return q.run(mode, ids);
+  };
+  const r = createSessionRefresher({ quiet: run, log: () => undefined, sleep: async () => undefined, now: () => t });
+  await r.apply(); // swap 1 at t=0
+  t = 10_000;
+  await r.apply(); // swap 2 at t=10 s: A still busy with the same work, owed again
+  t = 12_000;
+  release(); // swap 1's round now stops A, after swap 2 began: its new process already reads swap 2's account
+  await r.idle();
+  assert.deepEqual(q.stops, [A]);
+  assert.deepEqual(r.pendingAgents(), [], "nothing left to stop for swap 2");
+});
+
+test("stop mode: agents that only wait are passed as such to every round, and a check error is looked at again at once", async () => {
+  const state: Record<string, string> = { [A]: "delegado", [B]: "turno" };
+  const q = fakeQuiet(state);
+  const rounds: QuietRoundOptions[] = [];
+  const run = async (mode: QuietMode, ids: readonly string[] | "all", round: QuietRoundOptions = {}): Promise<QuietRun> => {
+    if (mode === "check") return { results: new Map([[A, "busy:delegado"], [B, "error:listProviderSubagents failed"]]), error: null };
+    rounds.push(round);
+    return q.run(mode, ids, round);
+  };
+  const r = createSessionRefresher({ quiet: run, log: () => undefined, sleep: async () => undefined });
+  const s = await r.apply();
+  await r.idle();
+  assert.deepEqual(summary(s), { reloading: 0, stopped: 0, deferred: 1, unseen: 0, unchecked: 1, note: null });
+  assert.deepEqual(q.stops, [B], "the unchecked one was working: stopped in the same round");
+  state[A] = "turno"; // the delegated child's turn goes on: it still only waits
+  await r.recheck();
+  await r.idle();
+  assert.deepEqual(q.stops, [B]);
+  assert.deepEqual(rounds.at(-1)?.waitOnly, [A]);
+});
+
+test("an 'all' round retried after an error skips the agents already settled for that swap", async () => {
+  const state: Record<string, string> = { [A]: "turno", [B]: "turno" };
+  const q = fakeQuiet(state);
+  const rounds: { ids: readonly string[] | "all"; skip?: readonly string[] }[] = [];
+  let fail = true;
+  const run = async (mode: QuietMode, ids: readonly string[] | "all", round: QuietRoundOptions = {}): Promise<QuietRun> => {
+    if (mode === "check") return { results: new Map(), error: "connect: ECONNREFUSED" };
+    rounds.push({ ids, skip: round.skip });
+    if (fail) { fail = false; const r = await q.run(mode, [A], round); return { ...r, error: "el ayudante dejó de responder" }; } // A stopped, then the helper died
+    return q.run(mode, ids === "all" ? Object.keys(state).filter((id) => !(round.skip ?? []).includes(id)) : ids, round);
+  };
+  const r = createSessionRefresher({ quiet: run, log: () => undefined, sleep: async () => undefined });
+  await r.apply();
+  await r.idle();
+  await r.recheck();
+  await r.idle();
+  assert.deepEqual(rounds.map((x) => x.skip), [[], [A]]);
+  assert.deepEqual(q.stops, [A, B], "A, already stopped and continuing, is not stopped again");
+});
+
+test("an agent handled after a swap began is not handled again for it, and ids are never sent twice", async () => {
+  let t = 0;
+  const state: Record<string, string> = { [A]: "turno" };
+  const q = fakeQuiet(state);
+  q.ctl.clock = () => t;
+  const r = createSessionRefresher({ quiet: q.run, log: () => undefined, sleep: async () => undefined, now: () => t });
+  t = 1000;
+  await r.apply(); // stops A at t=1000
+  await r.idle();
+  t = 1000; // a second report of the same swap arrives later, outside the coalescing window of the first (forced here)
+  const again = createSessionRefresher; void again;
+  t = 7000;
+  state[A] = "turno"; // A works on, on the new account
+  const before = q.stops.length;
+  await r.apply(); // a new swap at 7000: A was handled at 1000, so it is owed again
+  await r.idle();
+  assert.equal(q.stops.length, before + 1);
+  assert.ok(q.calls.every((c) => c.ids === "all" || new Set(c.ids).size === c.ids.length));
+});
+
+test("out-of-sight agents are counted apart and never retried", async () => {
+  const q = fakeQuiet({ [A]: "sin-visibilidad", [B]: "quiet" });
+  const r = createSessionRefresher({ quiet: q.run, log: () => undefined, sleep: async () => undefined });
+  const s = await r.apply();
+  await r.idle();
+  assert.deepEqual(summary(s), { reloading: 1, stopped: 0, deferred: 0, unseen: 1, unchecked: 0, note: null });
+  assert.deepEqual(r.pendingAgents(), []);
+  const n = q.calls.length;
+  await r.recheck();
+  assert.equal(q.calls.length, n, "nothing owed: no helper run every minute for it");
+});
+
+test("a failed reload settles nothing: a newer swap still owes that agent", async () => {
+  let t = 0;
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((res) => { release = res; });
+  let first = true;
+  const run = async (mode: QuietMode, ids: readonly string[] | "all"): Promise<QuietRun> => {
+    if (mode === "check") return { results: new Map([[A, "busy:subagentes"]]), error: null };
+    if (first) { first = false; await gate; return { results: new Map([[A, "error:no se pudo recargar: timeout"]]), error: null, actedAt: new Map([[A, 12_000]]) }; }
+    return { results: new Map([[A, "stopped"]]), error: null, actedAt: new Map([[A, t]]) };
+  };
+  const r = createSessionRefresher({ quiet: run, log: () => undefined, sleep: async () => undefined, now: () => t });
+  await r.apply(); // swap 1; its stop round hangs on A
+  t = 10_000;
+  const second = r.apply(); // swap 2 starts at 10 s
+  release(); // swap 1's round reports a FAILED reload at 12 s, before swap 2's check returns
+  const s = await second;
+  assert.equal(s.stopped, 1, "swap 2 still owes A its stop");
+  await r.idle();
+  assert.deepEqual(r.pendingAgents(), []);
+});
+
+test("in wait mode a check error is reported as unchecked, not as work being finished; the summary says the mode", async () => {
+  const run = async (mode: QuietMode): Promise<QuietRun> =>
+    mode === "check" ? { results: new Map([[A, "error:process table timed out"]]), error: null } : { results: new Map([[A, "reloaded"]]), error: null };
+  const r = createSessionRefresher({ quiet: run, ...silent });
+  const s = await r.apply();
+  await r.idle();
+  assert.deepEqual(s, { reloading: 0, stopped: 0, deferred: 0, unseen: 0, unchecked: 1, mode: "wait", note: null });
+  assert.deepEqual(swapNoticeLines(view({ warnings: [], sessions: s })), [
+    "1 sesión no se pudo comprobar: se mira de nuevo en segundo plano y cambia a la cuenta nueva en cuanto no tenga trabajo en marcha.",
+  ]);
+});
+
+test("after a failed check, the catch-up round re-classifies everyone and skips what was handled since the swap began", async () => {
+  let t = 0;
+  const rounds: { ids: readonly string[] | "all"; round: QuietRoundOptions }[] = [];
+  let checkOk = true;
+  const run = async (mode: QuietMode, ids: readonly string[] | "all", round: QuietRoundOptions = {}): Promise<QuietRun> => {
+    if (mode === "check") return checkOk ? { results: new Map([[A, "busy:delegado"], [B, "busy:turno"]]), error: null } : { results: new Map(), error: "timeout" };
+    rounds.push({ ids, round });
+    return ids === "all" ? { results: new Map([[A, "busy:turno"]]), error: null } : { results: new Map([[B, "stopped"]]), error: null, actedAt: new Map([[B, t]]) };
+  };
+  const r = createSessionRefresher({ quiet: run, log: () => undefined, sleep: async () => undefined, now: () => t });
+  await r.apply(); // swap 1: A waits (delegated), B stopped
+  await r.idle();
+  t = 10_000;
+  checkOk = false;
+  await r.apply(); // swap 2: the check fails
+  await r.idle();
+  const all = rounds.find((x) => x.ids === "all");
+  assert.ok(all);
+  assert.deepEqual(all.round.waitOnly, [], "the all round sees who is delegated itself");
+  assert.deepEqual(all.round.skip, [], "B was handled before swap 2 began: owed again");
 });

@@ -38,6 +38,15 @@ export const DEFAULT_HOST_ENTRY: HostEntry = { bridge: false, port: DEFAULT_PORT
 export const DEFAULT_REFRESH_MINUTES = 5;
 
 /**
+ * What a swap does with a Paseo session that is still working (a turn, a workflow, background agents or
+ * shells). "stop": stop it at once and continue on the new account, so the old one spends nothing more
+ * (workflows resume without re-running finished steps). "wait": let it finish on the old account first.
+ */
+export const BusySessions = z.enum(["stop", "wait"]);
+export type BusySessions = z.output<typeof BusySessions>;
+export const DEFAULT_BUSY_SESSIONS: BusySessions = "stop";
+
+/**
  * v1 -> v2: auto-refresh went from off by default to every 5 minutes. A v1 document holds an explicit
  * 0 even if nobody chose it: saving a per-host opt-in wrote every default. So 0 (or a missing value)
  * becomes 5; any other choice is kept. Runs on the host when it reads an older document.
@@ -59,6 +68,8 @@ export const swapperSettings = defineSettings({
     localPort: Port.default(DEFAULT_PORT),
     /** 0 = off; otherwise minutes between automatic refreshes while the panel is mounted. */
     autoRefreshMinutes: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(15), z.literal(30)]).default(DEFAULT_REFRESH_MINUTES),
+    /** Read ONLY by the server: see BusySessions. */
+    busySessions: BusySessions.default(DEFAULT_BUSY_SESSIONS),
     /** Diagnostics: reach this daemon's own LLMswapper through the terminal bridge instead of RPC. */
     bridgeForLocal: z.boolean().default(false),
     hosts: z.record(z.string(), hostEntry).default({}),

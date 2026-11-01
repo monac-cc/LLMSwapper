@@ -4,7 +4,7 @@ import { createActiveWatch } from "./server/active-watch.ts";
 import { executePlan } from "./server/executor.ts";
 import { createHandlers } from "./server/handlers.ts";
 import { resolveCli } from "./server/paseo-cli.ts";
-import { createPortSource } from "./server/port.ts";
+import { createBusySessionsSource, createPortSource } from "./server/port.ts";
 import { createQuietRunner } from "./server/quiet-helper.ts";
 import { createSessionRefresher } from "./server/session-refresh.ts";
 
@@ -14,11 +14,12 @@ const RECHECK_MS = 60_000;
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(swapperSettings);
   const port = createPortSource(settings);
+  const busySessions = createBusySessionsSource(settings);
   const quiet = createQuietRunner(resolveCli());
   console.log(quiet
-    ? "LLMswapper: tras un cambio de cuenta, cada sesión de Claude en Paseo se recargará cuando no tenga trabajo en marcha (ni en segundo plano)."
+    ? "LLMswapper: tras un cambio de cuenta, las sesiones de Claude en Paseo siguen con la cuenta nueva; las que tengan trabajo en marcha lo paran y lo retoman, o lo terminan antes según el ajuste del host."
     : "LLMswapper: no se encontró el cliente de Paseo; las sesiones abiertas no se recargarán solas.");
-  const refresher = createSessionRefresher({ quiet });
+  const refresher = createSessionRefresher({ quiet, busySessions: busySessions.get });
   // Account changes made outside the panel (LLMswapper's page, /swapper, its auto-rotation) reach open sessions too.
   const watch = createActiveWatch({
     getPort: port.get,
@@ -42,5 +43,6 @@ export default function contribute(server: PluginServerContext) {
     watch.stop();
     offTurn();
     void port.dispose();
+    void busySessions.dispose();
   };
 }

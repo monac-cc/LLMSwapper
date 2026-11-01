@@ -60,3 +60,15 @@ test("client error classification: only positive not-found signals mean node_mis
   assert.equal(classifyClientError("Workspace wks_1 is not active or does not exist"), "no_workspace");
   assert.equal(classifyClientError("something odd"), "terminal_failed");
 });
+
+test("claude_running: the machine's own environment follows the swap in Paseo; another environment (WSL) only reaches new sessions", async () => {
+  const { deriveWarnings } = await import("../shared/warnings.ts");
+  const health = { overridingEnv: [], staleMount: false, credentialsError: null, credentialsKind: "file", container: false, unavailable: [], claudeRunning: true } as unknown as Parameters<typeof deriveWarnings>[0];
+  const w = deriveWarnings(health, [
+    { id: "host", kind: "host", label: "Windows", activeId: null, running: true },
+    { id: "wsl:Ubuntu", kind: "wsl", label: "Ubuntu", activeId: null, running: true },
+  ] as unknown as Parameters<typeof deriveWarnings>[1]).find((x) => x.code === "claude_running");
+  assert.ok(w);
+  assert.match(w.message, /Windows: tras un cambio de cuenta, las sesiones de Paseo con este plugin pasan a la nueva/);
+  assert.match(w.message, /Ubuntu: un cambio de cuenta en ese entorno se aplica a las sesiones NUEVAS/);
+});
